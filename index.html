@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#171b19" />
+    <title>Biblioteca — Inventario</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Navegación principal">
+        <a class="brand" href="#" aria-label="Biblioteca, inicio">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none">
+              <path d="M5 8.5c4.3-1.8 8-.9 11 1.6v15c-3-2.5-6.7-3.4-11-1.6v-15Z" fill="currentColor" opacity=".54"/>
+              <path d="M27 8.5c-4.3-1.8-8-.9-11 1.6v15c3-2.5 6.7-3.4 11-1.6v-15Z" fill="currentColor"/>
+              <path d="M16 10v15" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="brand-name">biblioteca<span>.</span></span>
+        </a>
+
+        <div class="sidebar-section-label">MENÚ PRINCIPAL</div>
+        <nav class="main-nav">
+          <a class="nav-link" href="#resumen">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>
+            Resumen
+          </a>
+          <a class="nav-link active" href="#inventario" aria-current="page">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h16M4 12h16M4 18.5h16"/><circle cx="7" cy="5.5" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18.5" r="1.5"/></svg>
+            Inventario
+            <span class="nav-count" id="nav-count">0</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <div class="sidebar-note">
+            <span class="note-icon" aria-hidden="true">✦</span>
+            <p>Un espacio para<br />cada gran historia.</p>
+            <span class="note-caption">Tu biblioteca, en orden.</span>
+          </div>
+          <div class="profile">
+            <div class="avatar" aria-hidden="true">B</div>
+            <div class="profile-info"><strong>Bibliotecario</strong><span>Administrador</span></div>
+            <span class="profile-dots" aria-hidden="true">···</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div class="breadcrumbs"><span>Administración</span><span class="crumb-slash">/</span><strong>Inventario</strong></div>
+          <div class="topbar-right">
+            <span class="today" id="today"></span>
+            <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Cambiar a tema claro" title="Cambiar a tema claro">
+              <svg class="theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.3A8.5 8.5 0 0 1 8.7 3.8 8.6 8.6 0 1 0 20.2 15.3Z"/></svg>
+              <svg class="theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2m0 15v2m9.5-9.5h-2m-15 0h-2m16.2-6.2-1.4 1.4M6.7 17.3l-1.4 1.4m13.4 0-1.4-1.4M6.7 6.7 5.3 5.3"/></svg>
+              <span id="theme-toggle-label">Tema claro</span>
+            </button>
+            <span class="topbar-divider"></span>
+            <div class="top-avatar" aria-label="Perfil de Bibliotecario">B</div>
+          </div>
+        </header>
+
+        <div class="page-content">
+          <section class="welcome-row" id="resumen">
+            <div>
+              <p class="eyebrow"><span class="eyebrow-line"></span> TU BIBLIOTECA, AL DÍA</p>
+              <h1>Inventario<span class="heading-period">.</span></h1>
+              <p class="page-description">Catálogo bibliográfico y números de inventario de cada ejemplar.</p>
+            </div>
+            <button class="button button-primary" id="add-book-button" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              Agregar registro
+            </button>
+          </section>
+
+          <section class="stats-grid" aria-label="Resumen del inventario">
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-label">Registros bibliográficos</span><span class="stat-icon icon-lilac"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h11a3 3 0 0 1 3 3v12H8a3 3 0 0 1-3-3v-12Z"/><path d="M5 16.5a3 3 0 0 1 3-3h11"/></svg></span></div>
+              <div class="stat-value" id="stat-titles">0</div>
+              <div class="stat-foot"><span class="stat-dot dot-lilac"></span>Entradas del catálogo</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-label">Ejemplares numerados</span><span class="stat-icon icon-blue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7.5h15v13h-15zM8 7.5V4.8h8v2.7M8 11.5h8M8 15.5h5"/></svg></span></div>
+              <div class="stat-value" id="stat-copies">0</div>
+              <div class="stat-foot"><span class="stat-dot dot-blue"></span>Números individuales asignados</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-label">Secciones</span><span class="stat-icon icon-green"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16m-16 6h16"/><circle cx="7" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/></svg></span></div>
+              <div class="stat-value" id="stat-sections">0</div>
+              <div class="stat-foot"><span class="stat-dot dot-green"></span>Áreas del catálogo</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-label">Rango de inventario</span><span class="stat-icon icon-amber"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/><path d="M8 5v4m8 1v4m-5 1v4"/></svg></span></div>
+              <div class="stat-value stat-value-range" id="stat-range">—</div>
+              <div class="stat-foot"><span class="stat-dot dot-amber"></span>Primer a último número asignado</div>
+            </article>
+          </section>
+
+          <section class="inventory-panel" id="inventario" aria-labelledby="inventory-title">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title-line"><h2 id="inventory-title">Catálogo bibliográfico</h2><span class="total-pill" id="results-count">0</span></div>
+                <p class="panel-subtitle">Los rangos importados se expanden a números individuales INV-000001.</p>
+              </div>
+              <div class="panel-actions">
+                <button class="button button-export" id="import-button" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0L8 8m4-4 4 4M5 15v5h14v-5"/></svg>
+                  Importar CSV
+                </button>
+                <input id="csv-input" type="file" accept=".csv,text/csv" hidden />
+                <button class="button button-export" id="export-button" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v11m0 0 4-4m-4 4-4-4M5 16.5v4h14v-4"/></svg>
+                  Exportar CSV
+                </button>
+              </div>
+            </div>
+
+            <div class="toolbar">
+              <label class="search-box">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></svg>
+                <input id="search-input" type="search" placeholder="Buscar título, autor o número de inventario..." autocomplete="off" />
+                <kbd>⌘ K</kbd>
+              </label>
+              <label class="filter-box">
+                <span class="sr-only">Filtrar por sección</span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10m-7 6h4"/></svg>
+                <select id="category-filter" aria-label="Filtrar por sección"><option value="">Todas las secciones</option></select>
+                <svg class="select-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+              </label>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th scope="col">NÚMEROS DE INVENTARIO</th><th scope="col">TÍTULO / AUTOR</th><th scope="col">SECCIÓN</th><th scope="col">PIE DE IMPRENTA</th><th scope="col">EJEMPLARES</th><th scope="col">ENCUADERNACIÓN / OBS.</th><th scope="col"><span class="sr-only">Acciones</span></th></tr>
+                </thead>
+                <tbody id="book-list"></tbody>
+              </table>
+              <div class="empty-state" id="empty-state" hidden>
+                <span class="empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4.5h11a3 3 0 0 1 3 3v12H8a3 3 0 0 1-3-3v-12Z"/><path d="M5 16.5a3 3 0 0 1 3-3h11"/></svg></span>
+                <strong id="empty-title">Todavía no hay libros</strong>
+                <p id="empty-description">Importá tu CSV para cargar el catálogo y expandir los rangos de inventario.</p>
+                <button class="button button-primary empty-add" id="empty-add-button" type="button">Agregar primer registro</button>
+              </div>
+            </div>
+            <div class="table-footer"><span id="footer-summary">Mostrando 0 libros</span><span class="storage-note"><span class="storage-dot"></span>Guardado en este dispositivo</span></div>
+          </section>
+          <p class="page-footnote">Hecho para cuidar cada historia <span aria-hidden="true">✳</span></p>
+        </div>
+      </main>
+    </div>
+
+    <dialog class="book-dialog" id="book-dialog" aria-labelledby="dialog-title">
+      <form id="book-form">
+        <div class="dialog-header">
+          <div><p class="eyebrow"><span class="eyebrow-line"></span> CATÁLOGO</p><h2 id="dialog-title">Agregar registro</h2><p class="dialog-description">Los números de inventario individuales deben ser únicos.</p></div>
+          <button class="icon-button close-dialog" type="button" aria-label="Cerrar">×</button>
+        </div>
+        <div class="form-grid">
+          <label class="form-field">N° de inventario <span class="required">*</span><input name="inventoryRange" required maxlength="40" placeholder="62 o 62-71" aria-describedby="inventory-help" /><span class="field-help" id="inventory-help">Se normaliza a INV-000062, INV-000063…</span></label>
+          <label class="form-field">Sección <span class="required">*</span><input name="section" required maxlength="120" list="category-options" placeholder="Ej. Educación" /><datalist id="category-options"></datalist></label>
+          <label class="form-field field-wide">Título <span class="required">*</span><input name="title" required maxlength="300" placeholder="Título tal como figura en el catálogo" /></label>
+          <label class="form-field field-wide">Autor/a <span class="required">*</span><input name="author" required maxlength="300" placeholder="Autor o autores" /></label>
+          <label class="form-field field-wide">Pie de imprenta<input name="imprint" maxlength="300" placeholder="Lugar: editorial, año" /></label>
+          <label class="form-field field-wide">Encuadernación / observaciones<input name="binding" maxlength="200" placeholder="Ej. Cartoné" /></label>
+        </div>
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+        <div class="dialog-actions"><button class="button button-cancel" type="button" id="cancel-button">Cancelar</button><button class="button button-primary" type="submit" id="save-button">Agregar registro</button></div>
+      </form>
+    </dialog>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
