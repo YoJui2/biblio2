@@ -1,6 +1,5 @@
 "use strict";
 
-const STORAGE_KEY = "biblioteca-inventario-v2";
 const INVENTORY_PREFIX = "INV-";
 const INVENTORY_WIDTH = 6;
 
@@ -21,7 +20,7 @@ const elements = {
   themeToggle: document.querySelector("#theme-toggle"),
 };
 
-let books = loadBooks();
+let books = [];
 let editingId = null;
 let toastTimeout;
 
@@ -55,34 +54,48 @@ function toggleTheme() {
   }
 }
 
-function loadBooks() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === null) return [];
-    const parsed = JSON.parse(saved);
-    if (!Array.isArray(parsed) || parsed.some((book) => (
-      !book || typeof book.id !== "string" || typeof book.title !== "string"
-      || !Array.isArray(book.inventoryNumbers)
-      || book.inventoryNumbers.some((number) => !Number.isSafeInteger(number) || number < 1)
-    ))) {
-      throw new Error("El formato del inventario guardado no es válido.");
-    }
-    return parsed;
-  } catch (error) {
-    console.error("No se pudo leer el inventario guardado.", error);
-    showToast("No se pudo cargar el inventario guardado.");
-    return [];
-  }
+function fromApiRecord(record) {
+  return {
+    id: String(record.id),
+    section: record.section,
+    title: record.title,
+    author: record.author,
+    imprint: record.imprint,
+    binding: record.binding,
+    inventorySource: record.inventory_source,
+    inventoryNumbers: record.inventory_numbers,
+  };
 }
 
-function saveBooks(nextBooks) {
+async function apiRequest(url, options = {}) {
+  const response = await fetch(url, options);
+  const contentType = response.headers.get("content-type") || "";
+  const body = contentType.includes("application/json") ? await response.json() : null;
+  if (!response.ok) {
+    const detail = body?.detail;
+    const message = Array.isArray(detail)
+      ? detail.map((item) => item.msg).join(" ")
+      : detail || `La API respondió con el estado ${response.status}.`;
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
+  return body;
+}
+
+async function refreshBooks() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextBooks));
-    books = nextBooks;
+    const records = await apiRequest("/api/books");
+    books = records.map(fromApiRecord);
+    renderBooks();
+    document.querySelector("#storage-label").textContent = "Conectado a MySQL";
+    document.querySelector(".storage-dot").classList.add("connected");
     return true;
   } catch (error) {
-    console.error("No se pudo guardar el inventario.", error);
-    showToast("No se pudieron guardar los cambios. Revisá el espacio disponible.");
+    console.error("No se pudo cargar el catálogo desde la API.", error);
+    document.querySelector("#storage-label").textContent = "Sin conexión al servidor";
+    document.querySelector(".storage-dot").classList.remove("connected");
+    showToast(`No se pudo conectar con FastAPI: ${error.message}`);
     return false;
   }
 }
@@ -230,7 +243,7 @@ function compressNumbers(numbers) {
   return sorted.map(String).join(", ");
 }
 
-function handleSubmit(event) {
+async function handleSubmit(event) {
   event.preventDefault();
   const data = new FormData(elements.form);
   const inventoryRange = String(data.get("inventoryRange")).trim();
@@ -250,166 +263,82 @@ function handleSubmit(event) {
     elements.formError.hidden = false;
     return;
   }
-  const idsInUse = new Set(books.filter((book) => book.id !== editingId).flatMap((book) => book.inventoryNumbers));
-  const duplicate = inventoryNumbers.find((number) => idsInUse.has(number));
-  if (duplicate !== undefined) {
-    elements.formError.textContent = `${formatInventoryNumber(duplicate)} ya está asignado a otro registro.`;
-    elements.formError.hidden = false;
-    return;
-  }
   const updated = {
-    id: editingId || makeId(),
     section,
     title,
     author,
     imprint: String(data.get("imprint")).trim(),
     binding: String(data.get("binding")).trim(),
-    inventoryNumbers,
-    inventorySource: compressNumbers(inventoryNumbers),
+    inventory_numbers: inventoryNumbers,
+    inventory_source: compressNumbers(inventoryNumbers),
   };
-  const nextBooks = editingId
-    ? books.map((book) => book.id === editingId ? updated : book)
-    : [updated, ...books];
-  if (!saveBooks(nextBooks)) return;
-  elements.dialog.close();
-  renderBooks();
-  showToast(editingId ? "Se guardaron los cambios del registro." : "El registro se agregó al catálogo.");
+  elements.saveButton.disabled = true;
+  try {
+    const path = editingId ? `/api/books/${encodeURIComponent(editingId)}` : "/api/books";
+    const method = editingId ? "PUT" : "POST";
+    await apiRequest(path, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updated),
+    });
+    elements.dialog.close();
+    const loaded = await refreshBooks();
+    if (!loaded) return;
+    showToast(editingId ? "Se guardaron los cambios del registro." : "El registro se agregó al catálogo.");
+  } catch (error) {
+    elements.formError.textContent = error.message;
+    elements.formError.hidden = false;
+  } finally {
+    elements.saveButton.disabled = false;
+  }
 }
 
-function makeId() {
-  return globalThis.crypto && typeof globalThis.crypto.randomUUID === "function"
-    ? globalThis.crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function deleteBook(id) {
+async function deleteBook(id) {
   const book = books.find((item) => item.id === id);
   if (!book) return;
   if (!window.confirm(`¿Querés eliminar "${book.title}" y sus ${book.inventoryNumbers.length} números de inventario? Esta acción no se puede deshacer.`)) return;
-  if (!saveBooks(books.filter((item) => item.id !== id))) return;
-  renderBooks();
-  showToast("El registro y sus números se eliminaron del inventario.");
-}
-
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let field = "";
-  let quoted = false;
-  const source = text.replace(/^\uFEFF/, "");
-  for (let index = 0; index < source.length; index += 1) {
-    const character = source[index];
-    if (quoted) {
-      if (character === '"' && source[index + 1] === '"') {
-        field += '"';
-        index += 1;
-      } else if (character === '"') {
-        quoted = false;
-      } else {
-        field += character;
-      }
-    } else if (character === '"' && field.length === 0) {
-      quoted = true;
-    } else if (character === ",") {
-      row.push(field);
-      field = "";
-    } else if (character === "\n" || character === "\r") {
-      if (character === "\r" && source[index + 1] === "\n") index += 1;
-      row.push(field);
-      if (row.some((value) => value.trim())) rows.push(row);
-      row = [];
-      field = "";
-    } else {
-      field += character;
-    }
+  try {
+    await apiRequest(`/api/books/${encodeURIComponent(id)}`, { method: "DELETE" });
+    const loaded = await refreshBooks();
+    if (!loaded) return;
+    showToast("El registro y sus números se eliminaron del inventario.");
+  } catch (error) {
+    showToast(`No se pudo eliminar el registro: ${error.message}`);
   }
-  if (quoted) throw new Error("El CSV termina con un campo entre comillas sin cerrar.");
-  if (field.length || row.length) {
-    row.push(field);
-    if (row.some((value) => value.trim())) rows.push(row);
-  }
-  return rows;
-}
-
-function normalizeHeader(header) {
-  return header.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .toLocaleLowerCase("es").replace(/[^a-z0-9]/g, "");
-}
-
-function importCsvText(text) {
-  const rows = parseCsv(text);
-  const headerIndex = rows.findIndex((row) => {
-    const headers = row.map(normalizeHeader);
-    return headers.includes("seccion") && headers.includes("autor")
-      && headers.includes("titulo") && headers.includes("piedeimprenta")
-      && headers.some((header) => header.includes("inv"));
-  });
-  if (headerIndex < 0) throw new Error("No encontré los encabezados Sección, N° Inv., Autor, Título y Pie de Imprenta.");
-  const headers = rows[headerIndex].map(normalizeHeader);
-  const column = (predicate) => headers.findIndex(predicate);
-  const indexes = {
-    section: column((header) => header === "seccion"),
-    inventory: column((header) => header.includes("inv")),
-    author: column((header) => header === "autor"),
-    title: column((header) => header === "titulo"),
-    imprint: column((header) => header.includes("imprenta")),
-    binding: column((header) => header.includes("encuadernacion") || header.includes("observaciones")),
-  };
-  const imported = [];
-  const seenNumbers = new Map();
-  const errors = [];
-  for (let index = headerIndex + 1; index < rows.length; index += 1) {
-    const row = rows[index];
-    if (!row.some((value) => value.trim())) continue;
-    const record = Object.fromEntries(Object.entries(indexes).map(([key, position]) => [key, (row[position] || "").trim()]));
-    if (!record.inventory && !record.title && !record.author) continue;
-    if (!record.section || !record.inventory || !record.title || !record.author) {
-      errors.push(`fila ${index + 1}: falta sección, número de inventario, título o autor`);
-      continue;
-    }
-    let inventoryNumbers;
-    try {
-      inventoryNumbers = parseInventoryRange(record.inventory);
-    } catch (error) {
-      errors.push(`fila ${index + 1} (${record.inventory}): ${error.message}`);
-      continue;
-    }
-    const duplicate = inventoryNumbers.find((number) => seenNumbers.has(number));
-    if (duplicate !== undefined) {
-      errors.push(`fila ${index + 1}: ${formatInventoryNumber(duplicate)} se repite (también en fila ${seenNumbers.get(duplicate)})`);
-      continue;
-    }
-    inventoryNumbers.forEach((number) => seenNumbers.set(number, index + 1));
-    imported.push({
-      id: makeId(),
-      section: record.section,
-      inventorySource: record.inventory,
-      inventoryNumbers,
-      author: record.author,
-      title: record.title,
-      imprint: record.imprint,
-      binding: record.binding,
-    });
-  }
-  if (errors.length) throw new Error(`No se importó el archivo: ${errors.slice(0, 5).join("; ")}${errors.length > 5 ? `; y ${errors.length - 5} errores más` : ""}.`);
-  if (!imported.length) throw new Error("El archivo no contiene registros para importar.");
-  return imported;
 }
 
 async function handleCsvFile(file) {
+  let confirmed = false;
   try {
-    const text = await file.text();
-    const imported = importCsvText(text);
-    if (books.length && !window.confirm(`El archivo contiene ${imported.length} registros y reemplazará los ${books.length} registros actuales. ¿Continuar?`)) return;
-    if (!saveBooks(imported)) return;
+    if (books.length) {
+      if (!window.confirm(`La importación reemplazará los ${books.length} registros actuales. ¿Continuar?`)) return;
+      confirmed = true;
+    }
+    const upload = async (confirmReplace) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("confirm_replace", String(confirmReplace));
+      return apiRequest("/api/import?mode=replace", {
+        method: "POST",
+        body: formData,
+      });
+    };
+    let result;
+    try {
+      result = await upload(confirmed);
+    } catch (error) {
+      if (error.status !== 409 || !error.message.startsWith("MySQL ya contiene ") || confirmed
+        || !window.confirm(`${error.message}\n\n¿Reemplazar el catálogo de MySQL?`)) throw error;
+      result = await upload(true);
+    }
     elements.search.value = "";
     elements.categoryFilter.value = "";
-    renderBooks();
-    const totalCopies = imported.reduce((total, book) => total + book.inventoryNumbers.length, 0);
-    showToast(`Importados ${imported.length} registros y ${totalCopies} ejemplares numerados.`);
+    const loaded = await refreshBooks();
+    if (!loaded) return;
+    showToast(`Importados ${result.records} registros y ${result.copies} ejemplares numerados.`);
   } catch (error) {
-    console.error("No se pudo importar el CSV.", error);
-    showToast(error.message || "No se pudo leer el archivo CSV.");
+    console.error("No se pudo importar el CSV a MySQL.", error);
+    showToast(`No se pudo importar el CSV: ${error.message}`);
   } finally {
     elements.csvInput.value = "";
   }
@@ -505,3 +434,4 @@ document.querySelector("#today").textContent = new Intl.DateTimeFormat("es-AR", 
 
 loadTheme();
 renderBooks();
+refreshBooks();
