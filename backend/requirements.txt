@@ -1,7 +1,10 @@
 alembic>=1.13,<2
 fastapi>=0.115,<1
+pillow>=10.4,<12
+pillow-heif>=0.18,<2
 pydantic-settings>=2.6,<3
 pymysql>=1.1,<2
+pytesseract>=0.3.13,<1
 python-multipart>=0.0.12,<1
 sqlalchemy>=2.0,<3
 uvicorn[standard]>=0.32,<1

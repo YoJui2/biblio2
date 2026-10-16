@@ -33,8 +33,38 @@ MySQL solo es accesible desde la red interna de Docker; no se publica un puerto 
 | `PUT` | `/api/books/{id}` | Actualiza un registro y su rango de ejemplares. |
 | `DELETE` | `/api/books/{id}` | Elimina el registro y sus ejemplares asociados. |
 | `POST` | `/api/import?mode=replace` | Valida y reemplaza el catálogo a partir de un CSV; requiere confirmación si la base ya tiene registros. |
+| `GET` | `/api/ocr/status` | Informa si Tesseract está disponible, su versión y los idiomas instalados. |
+| `POST` | `/api/ocr/scan` | Lee una imagen escaneada y devuelve una propuesta de campos; no persiste nada. |
 
 La interfaz abre en tema oscuro. El botón de sol/luna permite cambiar al tema claro; la selección se guarda aparte de los datos del catálogo.
+
+## Lectura de imágenes escaneadas (OCR)
+
+Para digitalizar fichas escaneadas sin transcribirlas a mano, el panel usa [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) a través de `pytesseract`. El contenedor de la API ya instala `tesseract-ocr` y el paquete de idioma español (`tesseract-ocr-spa`).
+
+1. Elegí **Leer imagen (OCR)** en la barra del panel, o **Cargar imagen** dentro del formulario de registro, y seleccioná una foto o escaneo (PNG, JPG, TIFF, BMP, WEBP, GIF, y HEIC/AVIF para fotos de celular; hasta 20 MB).
+2. La API preprocesa la imagen (escala de grises, autocontraste y reescalado) y ejecuta Tesseract con los idiomas `spa+eng`.
+3. El formulario **Agregar registro** se abre con los campos reconocidos y la imagen de referencia: número de inventario, sección, título, autor, pie de imprenta y encuadernación.
+4. Revisá y corregí los campos, y guardá el registro. **El OCR nunca escribe en la base por su cuenta**: solo propone valores.
+
+La respuesta de `/api/ocr/scan` incluye `confidence` (confianza media de Tesseract), `raw_text` (texto crudo) y `warnings` (por ejemplo, si no reconoció números de inventario o si la confianza es baja). Las secciones conocidas se envían a la API para mejorar la detección del campo `Sección`.
+
+Configuración opcional en `.env`:
+
+| Variable | Uso |
+| --- | --- |
+| `OCR_LANGUAGES` | Idiomas de Tesseract, por defecto `spa+eng`. |
+| `TESSERACT_CMD` | Ruta al binario `tesseract`; en Docker ya vale `/usr/bin/tesseract`. |
+
+El reconocimiento es una **propuesta**: los rangos repetidos, ilegibles o ambiguos deben corregirse antes de guardar, igual que con la importación por CSV.
+
+### Formatos y errores
+
+- Formatos admitidos: PNG, JPG, TIFF, BMP, WEBP, GIF y, si `pillow-heif` está instalado, HEIC/HEIF y AVIF (fotos de celular). Consultá la lista en `GET /api/ocr/status` (campo `formats`).
+- Formato no reconocido o imagen ilegible: `422` con un mensaje concreto en el formulario.
+- Archivo que no es imagen: `400`. Imagen mayor a 20 MB: `413`.
+- Tesseract ausente o mal configurado: `503`; el panel avisa que hay que recompilar la API (`docker compose up --build`).
+- Si la API no responde, el panel muestra "No se pudo conectar con el servidor" en lugar del error crudo del navegador, y recuerda abrir el panel desde `http://localhost:8000/`.
 
 ## Formato del CSV
 
@@ -113,14 +143,14 @@ El CSV agrupa varios números bajo un mismo registro bibliográfico. Esto modela
 4. **Trazabilidad:** guardar archivo, fecha, usuario, fila de origen, número original y resultado de cada importación; permitir descargar un informe de filas omitidas o conflictivas.
 5. **Transacciones y concurrencia:** validar y aplicar una importación como operación atómica; usar transacciones y control de versión para que dos administradores no se pisen.
 6. **Respaldo y permisos:** definir autenticación, roles, exportaciones de respaldo y políticas de recuperación antes de exponer la API a una red o usar el sistema como inventario oficial. Esta versión no incluye login.
-7. **OCR futuro:** tratar la transcripción como una propuesta, no como una importación directa. Mostrar imagen y campos reconocidos para corregir rangos repetidos, ilegibles o ambiguos antes de persistirlos.
+7. **OCR de imágenes escaneadas:** implementado como propuesta (`/api/ocr/scan`); muestra la imagen y los campos reconocidos para corregir rangos repetidos, ilegibles o ambiguos antes de persistirlos.
 
 ## Archivos de la interfaz
 
 - [`index.html`](./index.html): estructura y formulario.
 - [`styles.css`](./styles.css): estilos y temas claro/oscuro.
-- [`app.js`](./app.js): operaciones CRUD, validación, CSV y llamadas a la API.
-- [`backend/app/`](./backend/app/): API FastAPI, modelos, validación e importación.
+- [`app.js`](./app.js): operaciones CRUD, validación, CSV, OCR y llamadas a la API.
+- [`backend/app/`](./backend/app/): API FastAPI, modelos, validación, importación y OCR.
 - [`backend/migrations/`](./backend/migrations/): migraciones versionadas con Alembic.
 - [`backend/tests/`](./backend/tests/): pruebas de importación, API y migraciones.
 - [`backend/requirements.txt`](./backend/requirements.txt): dependencias de la API, instaladas durante la construcción de la imagen Docker.

@@ -9,6 +9,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app import ocr
 from app.config import PROJECT_ROOT, Settings
 from app.db import Base, make_session_factory, session_dependency
 from app.inventory import (
@@ -17,7 +18,14 @@ from app.inventory import (
     validate_numbers_not_in_use,
 )
 from app.models import BibliographicRecord, InventoryCopy
-from app.schemas import ImportResult, RecordCreate, RecordRead, RecordUpdate
+from app.schemas import (
+    ImportResult,
+    OCRResult,
+    OCRStatus,
+    RecordCreate,
+    RecordRead,
+    RecordUpdate,
+)
 
 
 def create_app(
@@ -234,6 +242,68 @@ def create_app(
             copies=total_numbers,
             sections=len(sections),
         )
+
+    default_ocr_languages = settings.ocr_languages if settings else ocr.DEFAULT_LANGUAGES
+
+    @application.get("/api/ocr/status", response_model=OCRStatus, tags=["ocr"])
+    def ocr_status() -> dict[str, object]:
+        return ocr.tesseract_status()
+
+    @application.post(
+        "/api/ocr/scan",
+        response_model=OCRResult,
+        tags=["ocr"],
+    )
+    async def scan_record_image(
+        file: Annotated[UploadFile, File()],
+        languages: Annotated[str | None, Form()] = None,
+        sections: Annotated[str | None, Form()] = None,
+    ):
+        suffix = Path(file.filename or "").suffix.lower()
+        content_type = file.content_type or ""
+        allowed_suffixes = {
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".tif",
+            ".tiff",
+            ".bmp",
+            ".webp",
+            ".gif",
+            ".heic",
+            ".heif",
+            ".avif",
+        }
+        if suffix not in allowed_suffixes and not content_type.startswith("image/"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Seleccioná una imagen escaneada ({ocr.SUPPORTED_FORMATS}).",
+            )
+        content = await file.read(ocr.MAX_IMAGE_BYTES + 1)
+        if len(content) > ocr.MAX_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="La imagen supera el límite de 20 MB. Reducila o escaneá a menor resolución.",
+            )
+        if not content:
+            raise HTTPException(status_code=400, detail="El archivo llegó vacío.")
+        selected_languages = (languages or default_ocr_languages).strip() or default_ocr_languages
+        known_sections = [
+            value.strip() for value in (sections or "").split(",") if value.strip()
+        ]
+        try:
+            return ocr.scan_image_bytes(content, selected_languages, known_sections)
+        except ocr.OcrUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        except ocr.OcrError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except HTTPException:
+            raise
+        except Exception as error:  # noqa: BLE001 - siempre devolvemos JSON legible
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error inesperado al leer la imagen: {error}",
+            ) from error
 
     @application.get("/", include_in_schema=False)
     def index():

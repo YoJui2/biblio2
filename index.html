@@ -118,6 +118,11 @@
                   Importar CSV
                 </button>
                 <input id="csv-input" type="file" accept=".csv,text/csv" hidden />
+                <label class="button button-export" for="ocr-input">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M8 12h8"/></svg>
+                  Leer imagen (OCR)
+                </label>
+                <input id="ocr-input" type="file" accept="image/*" hidden />
                 <button class="button button-export" id="export-button" type="button">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v11m0 0 4-4m-4 4-4-4M5 16.5v4h14v-4"/></svg>
                   Exportar CSV
@@ -165,6 +170,18 @@
         <div class="dialog-header">
           <div><p class="eyebrow"><span class="eyebrow-line"></span> CATÁLOGO</p><h2 id="dialog-title">Agregar registro</h2><p class="dialog-description">Los números de inventario individuales deben ser únicos.</p></div>
           <button class="icon-button close-dialog" type="button" aria-label="Cerrar">×</button>
+        </div>
+        <div class="ocr-loader">
+          <label class="button button-export" for="ocr-dialog-input">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M8 12h8"/></svg>
+            Cargar imagen
+          </label>
+          <input id="ocr-dialog-input" type="file" accept="image/*" hidden />
+          <span class="ocr-loader-hint" id="ocr-loader-hint">Leé una ficha escaneada y se completan los campos.</span>
+        </div>
+        <div class="ocr-preview" id="ocr-preview" hidden>
+          <img id="ocr-image" alt="Ficha escaneada" />
+          <p class="ocr-note" id="ocr-note"></p>
         </div>
         <div class="form-grid">
           <label class="form-field">N° de inventario <span class="required">*</span><input name="inventoryRange" required maxlength="40" placeholder="62 o 62-71" aria-describedby="inventory-help" /><span class="field-help" id="inventory-help">Se normaliza a INV-000062, INV-000063…</span></label>

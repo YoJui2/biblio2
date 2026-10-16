@@ -17,12 +17,18 @@ const elements = {
   formError: document.querySelector("#form-error"),
   toast: document.querySelector("#toast"),
   csvInput: document.querySelector("#csv-input"),
+  ocrInput: document.querySelector("#ocr-input"),
+  ocrDialogInput: document.querySelector("#ocr-dialog-input"),
+  ocrPreview: document.querySelector("#ocr-preview"),
+  ocrImage: document.querySelector("#ocr-image"),
+  ocrNote: document.querySelector("#ocr-note"),
   themeToggle: document.querySelector("#theme-toggle"),
 };
 
 let books = [];
 let editingId = null;
 let toastTimeout;
+let ocrImageUrl = null;
 
 function applyTheme(theme) {
   const selectedTheme = theme === "light" ? "light" : "dark";
@@ -67,18 +73,41 @@ function fromApiRecord(record) {
   };
 }
 
+function httpError(message, status, detail) {
+  const error = new Error(message);
+  error.status = status;
+  if (detail) error.detail = detail;
+  return error;
+}
+
 async function apiRequest(url, options = {}) {
-  const response = await fetch(url, options);
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (cause) {
+    if (location.protocol === "file:") {
+      throw httpError("El panel se abrió como archivo. Abrilo desde http://localhost:8000/", 0);
+    }
+    throw httpError(
+      "No se pudo conectar con el servidor. Verificá que la API esté en ejecución.",
+      0,
+    );
+  }
   const contentType = response.headers.get("content-type") || "";
-  const body = contentType.includes("application/json") ? await response.json() : null;
+  let body = null;
+  try {
+    body = contentType.includes("application/json")
+      ? await response.json()
+      : { detail: (await response.text()).slice(0, 500) };
+  } catch (cause) {
+    body = null;
+  }
   if (!response.ok) {
     const detail = body?.detail;
     const message = Array.isArray(detail)
       ? detail.map((item) => item.msg).join(" ")
       : detail || `La API respondió con el estado ${response.status}.`;
-    const error = new Error(message);
-    error.status = response.status;
-    throw error;
+    throw httpError(message, response.status, detail);
   }
   return body;
 }
@@ -217,8 +246,19 @@ function showToast(message) {
   toastTimeout = setTimeout(() => elements.toast.classList.remove("visible"), 3500);
 }
 
+function resetOcrPreview() {
+  if (ocrImageUrl) {
+    URL.revokeObjectURL(ocrImageUrl);
+    ocrImageUrl = null;
+  }
+  elements.ocrPreview.hidden = true;
+  elements.ocrImage.removeAttribute("src");
+  elements.ocrNote.textContent = "";
+}
+
 function openDialog(book = null) {
   editingId = book ? book.id : null;
+  resetOcrPreview();
   elements.form.reset();
   elements.formError.hidden = true;
   elements.dialogTitle.textContent = book ? "Editar registro" : "Agregar registro";
@@ -231,6 +271,38 @@ function openDialog(book = null) {
   }
   elements.dialog.showModal();
   elements.form.elements.inventoryRange.focus();
+}
+
+function fillFormFromOcr(result) {
+  const range = result.inventory_source
+    || (result.inventory_numbers.length ? compressNumbers(result.inventory_numbers) : "");
+  elements.form.elements.inventoryRange.value = range;
+  elements.form.elements.section.value = result.section || "";
+  elements.form.elements.title.value = result.title || "";
+  elements.form.elements.author.value = result.author || "";
+  elements.form.elements.imprint.value = result.imprint || "";
+  elements.form.elements.binding.value = result.binding || "";
+}
+
+function showOcrSuggestion(result, imageUrl) {
+  if (elements.dialog.open) {
+    resetOcrPreview();
+    elements.formError.hidden = true;
+  } else {
+    openDialog();
+  }
+  fillFormFromOcr(result);
+  ocrImageUrl = imageUrl;
+  elements.ocrImage.src = imageUrl;
+  elements.ocrPreview.hidden = false;
+  const notices = [];
+  if (result.inventory_numbers.length) {
+    notices.push(`Reconocí ${result.inventory_numbers.length} número(s) de inventario.`);
+  }
+  notices.push(...(result.warnings || []));
+  notices.push(`Confianza de lectura: ${result.confidence}%. Revisá y corregí antes de guardar.`);
+  elements.ocrNote.textContent = notices.join(" ");
+  elements.form.elements.title.focus();
 }
 
 function compressNumbers(numbers) {
@@ -344,6 +416,90 @@ async function handleCsvFile(file) {
   }
 }
 
+const OCR_ACCEPTED = /\.(png|jpe?g|tiff?|bmp|webp|gif|heic|heif|avif)$/i;
+const OCR_MAX_BYTES = 20 * 1024 * 1024;
+let ocrStatusCache;
+
+function setOcrBusy(busy, message) {
+  const hint = document.querySelector("#ocr-loader-hint");
+  if (hint) {
+    hint.textContent = message || "Leé una ficha escaneada y se completan los campos.";
+  }
+  document
+    .querySelectorAll('label.button[for="ocr-input"], label.button[for="ocr-dialog-input"]')
+    .forEach((element) => element.classList.toggle("busy", busy));
+}
+
+function validateImageFile(file) {
+  const looksImage = (file.type || "").startsWith("image/") || OCR_ACCEPTED.test(file.name || "");
+  if (!looksImage) {
+    throw httpError("El archivo no parece una imagen. Formatos admitidos: PNG, JPG, TIFF, BMP, WEBP, GIF o HEIC.", 400);
+  }
+  if (file.size > OCR_MAX_BYTES) {
+    throw httpError("La imagen supera los 20 MB. Reducila o escaneá a menor resolución.", 413);
+  }
+}
+
+function describeOcrError(error) {
+  if (error.status === 0) return error.message;
+  if (error.status === 400) return error.message;
+  if (error.status === 413) return error.message;
+  if (error.status === 503) return `Tesseract no está disponible: ${error.message}`;
+  if (error.status === 422) return `No se pudo leer la imagen. ${error.message}`;
+  if (error.status === 404) return "El servidor no tiene el módulo OCR. Recompilá la API con docker compose up --build.";
+  return `No se pudo leer la imagen: ${error.message}`;
+}
+
+function reportOcrError(error) {
+  console.error("No se pudo leer la imagen escaneada.", error);
+  const message = describeOcrError(error);
+  if (elements.dialog.open) {
+    elements.formError.textContent = message;
+    elements.formError.hidden = false;
+  } else {
+    showToast(message);
+  }
+}
+
+async function getOcrStatus() {
+  if (ocrStatusCache) return ocrStatusCache;
+  try {
+    ocrStatusCache = await apiRequest("/api/ocr/status");
+  } catch (error) {
+    ocrStatusCache = null;
+  }
+  return ocrStatusCache;
+}
+
+async function handleOcrFile(file) {
+  const imageUrl = URL.createObjectURL(file);
+  if (elements.dialog.open) elements.formError.hidden = true;
+  setOcrBusy(true, "Leyendo la imagen con Tesseract…");
+  try {
+    validateImageFile(file);
+    const status = await getOcrStatus();
+    if (status && status.available === false) {
+      throw httpError(
+        `Tesseract no está disponible en el servidor. ${status.detail || "Recompilá la API: docker compose up --build."}`,
+        503,
+      );
+    }
+    const formData = new FormData();
+    formData.append("file", file);
+    const sections = [...new Set(books.map((book) => book.section).filter(Boolean))].join(",");
+    if (sections) formData.append("sections", sections);
+    const result = await apiRequest("/api/ocr/scan", { method: "POST", body: formData });
+    showOcrSuggestion(result, imageUrl);
+  } catch (error) {
+    URL.revokeObjectURL(imageUrl);
+    reportOcrError(error);
+  } finally {
+    setOcrBusy(false);
+    elements.ocrInput.value = "";
+    elements.ocrDialogInput.value = "";
+  }
+}
+
 function exportCsv() {
   const headers = ["Sección", "N° Inv.", "Autor", "Título", "Pie de Imprenta", "Encuadernación / Observaciones"];
   const quote = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
@@ -380,9 +536,19 @@ elements.categoryFilter.addEventListener("change", renderBooks);
 document.querySelector("#export-button").addEventListener("click", exportCsv);
 document.querySelector("#import-button").addEventListener("click", () => elements.csvInput.click());
 elements.themeToggle.addEventListener("click", toggleTheme);
+elements.dialog.addEventListener("close", resetOcrPreview);
 elements.csvInput.addEventListener("change", () => {
   const [file] = elements.csvInput.files;
   if (file) handleCsvFile(file);
+});
+elements.ocrInput.addEventListener("change", () => {
+  const [file] = elements.ocrInput.files;
+  if (file) handleOcrFile(file);
+});
+elements.ocrDialogInput.addEventListener("change", () => {
+  const [file] = elements.ocrDialogInput.files;
+  if (file) handleOcrFile(file);
+  elements.ocrDialogInput.value = "";
 });
 
 elements.list.addEventListener("click", (event) => {

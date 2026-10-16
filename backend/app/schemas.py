@@ -53,3 +53,30 @@ class ImportResult(BaseModel):
     records: int
     copies: int
     sections: int
+
+
+class OCRStatus(BaseModel):
+    available: bool
+    version: str | None = None
+    languages: list[str] = Field(default_factory=list)
+    default_languages: str
+    formats: str | None = None
+    binary: str | None = None
+    detail: str | None = None
+
+
+class OCRResult(BaseModel):
+    status: str
+    confidence: float
+    languages: str
+    raw_text: str
+    width: int
+    height: int
+    section: str = ""
+    title: str = ""
+    author: str = ""
+    imprint: str = ""
+    binding: str = ""
+    inventory_numbers: list[int] = Field(default_factory=list)
+    inventory_source: str = ""
+    warnings: list[str] = Field(default_factory=list)
