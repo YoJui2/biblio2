@@ -179,6 +179,10 @@
           <input id="ocr-dialog-input" type="file" accept="image/*" hidden />
           <span class="ocr-loader-hint" id="ocr-loader-hint">Leé una ficha escaneada y se completan los campos.</span>
         </div>
+        <div class="ocr-alert" id="ocr-alert" role="alert" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5m0 3.5v.01M10.3 3.9 2.6 17.4A1.6 1.6 0 0 0 4 19.9h16a1.6 1.6 0 0 0 1.4-2.5L13.7 3.9a1.6 1.6 0 0 0-2.8 0Z"/></svg>
+          <span id="ocr-alert-message"></span>
+        </div>
         <div class="ocr-preview" id="ocr-preview" hidden>
           <img id="ocr-image" alt="Ficha escaneada" />
           <p class="ocr-note" id="ocr-note"></p>

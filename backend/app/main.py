@@ -243,11 +243,9 @@ def create_app(
             sections=len(sections),
         )
 
-    default_ocr_languages = settings.ocr_languages if settings else ocr.DEFAULT_LANGUAGES
-
     @application.get("/api/ocr/status", response_model=OCRStatus, tags=["ocr"])
     def ocr_status() -> dict[str, object]:
-        return ocr.tesseract_status()
+        return ocr.ocr_status()
 
     @application.post(
         "/api/ocr/scan",
@@ -256,7 +254,6 @@ def create_app(
     )
     async def scan_record_image(
         file: Annotated[UploadFile, File()],
-        languages: Annotated[str | None, Form()] = None,
         sections: Annotated[str | None, Form()] = None,
     ):
         suffix = Path(file.filename or "").suffix.lower()
@@ -287,12 +284,11 @@ def create_app(
             )
         if not content:
             raise HTTPException(status_code=400, detail="El archivo llegó vacío.")
-        selected_languages = (languages or default_ocr_languages).strip() or default_ocr_languages
         known_sections = [
             value.strip() for value in (sections or "").split(",") if value.strip()
         ]
         try:
-            return ocr.scan_image_bytes(content, selected_languages, known_sections)
+            return ocr.scan_image_bytes(content, known_sections)
         except ocr.OcrUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
         except ocr.OcrError as error:

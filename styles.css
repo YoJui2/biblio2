@@ -296,6 +296,14 @@ html[data-theme="light"] { color-scheme: light; }
   .theme-toggle span { display: none; }
 }
 
+.ocr-alert { display: flex; gap: 9px; align-items: flex-start; margin: 0 0 16px; padding: 11px 13px; border: 1px solid #eccfcb; border-radius: 8px; background: #fdf1ef; color: #a4453d; font-size: 12px; line-height: 1.5; }
+.ocr-alert[hidden] { display: none; }
+.ocr-alert svg { flex: none; width: 16px; height: 16px; margin-top: 1px; }
+.ocr-alert.ocr-alert-warn { border-color: #ecd9b8; background: #fdf6e8; color: #8a6519; }
+.ocr-alert.ocr-alert-ok { border-color: #cfe3d0; background: #f0f7f0; color: #3d6847; }
+html[data-theme="dark"] .ocr-alert { border-color: #6a403c; background: #2e211f; color: #eaa79f; }
+html[data-theme="dark"] .ocr-alert.ocr-alert-warn { border-color: #6a5a2f; background: #2c2617; color: #e2c583; }
+html[data-theme="dark"] .ocr-alert.ocr-alert-ok { border-color: #3c5540; background: #23302a; color: #b6d8b6; }
 .ocr-loader { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
 .ocr-loader-hint { color: #7c857c; font-size: 12px; }
 .ocr-preview { display: grid; grid-template-columns: 132px 1fr; gap: 14px; align-items: start; margin: 0 0 18px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: #f6f8f4; }

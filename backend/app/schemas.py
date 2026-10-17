@@ -57,18 +57,16 @@ class ImportResult(BaseModel):
 
 class OCRStatus(BaseModel):
     available: bool
-    version: str | None = None
-    languages: list[str] = Field(default_factory=list)
-    default_languages: str
+    engine: str = "trocr"
+    model: str | None = None
     formats: str | None = None
-    binary: str | None = None
     detail: str | None = None
 
 
 class OCRResult(BaseModel):
     status: str
+    engine: str = "trocr"
     confidence: float
-    languages: str
     raw_text: str
     width: int
     height: int

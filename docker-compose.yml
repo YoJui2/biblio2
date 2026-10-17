@@ -23,7 +23,7 @@ services:
     environment:
       DATABASE_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE}?charset=utf8mb4
       FRONTEND_DIR: /app/ui
-      OCR_LANGUAGES: ${OCR_LANGUAGES:-spa+eng}
+      TROCR_MODEL: ${TROCR_MODEL:-microsoft/trocr-base-handwritten}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

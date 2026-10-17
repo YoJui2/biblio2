@@ -38,6 +38,14 @@ def test_interpret_expands_inventory_range_token() -> None:
     assert result["inventory_source"] == "62–71"
 
 
+def test_interpret_reads_several_numbers_from_one_line() -> None:
+    result = interpret_ocr_text("hola mundo\n67 67 78 78\nCartoné")
+
+    assert result["inventory_numbers"] == [67, 78]
+    assert result["title"] == "hola mundo"
+    assert result["binding"] == "Cartoné"
+
+
 def test_interpret_detects_known_section_and_title_author() -> None:
     text = "Educación\nMatemática 6\nMaría López\n"
 
@@ -68,8 +76,9 @@ def test_ocr_status_reports_availability(tmp_path) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert "available" in body
-    assert body["default_languages"] == "spa+eng"
+    assert isinstance(body["available"], bool)
+    assert body["engine"] == "trocr"
+    assert body["model"]
     assert "PNG" in (body["formats"] or "")
 
 

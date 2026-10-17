@@ -1,12 +1,11 @@
-"""Lectura OCR de fichas escaneadas.
+"""Lectura OCR de fichas escaneadas con TrOCR (Microsoft).
 
-Tesseract devuelve texto sin estructura; este módulo lo interpreta como una
-**propuesta editable**. Nunca persiste datos: la interfaz muestra los campos
-reconocidos para que la persona los corrija antes de guardarlos.
+TrOCR reconoce **líneas** de texto manuscrito o impreso. Para leer una ficha
+completa, este módulo segmenta la imagen en renglones (y columnas) y reconoce
+cada fragmento; después interpreta el texto como una **propuesta editable**.
 
-Las dependencias pesadas (Pillow, pytesseract) se importan de forma perezosa
-para que el resto de la API siga funcionando aunque Tesseract no esté
-instalado en el entorno.
+Nunca persiste datos: la interfaz muestra la imagen y los campos reconocidos
+para que la persona los corrija antes de guardarlos.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ from __future__ import annotations
 import io
 import os
 import re
-import shutil
+import threading
 import unicodedata
 
 from app.inventory import parse_inventory_range
@@ -27,28 +26,27 @@ try:  # HEIC/HEIF de fotos de celular (dependencia opcional).
 except Exception:  # noqa: BLE001 - si no está instalado, seguimos sin HEIC
     _HEIF_AVAILABLE = False
 
-try:  # AVIF (parte de pillow-heif, distinta función de registro).
-    from pillow_heif import register_avif_opener
-
-    register_avif_opener()
-except Exception:  # noqa: BLE001 - AVIF es opcional
-    pass
-
-DEFAULT_LANGUAGES = "spa+eng"
+DEFAULT_MODEL = os.environ.get("TROCR_MODEL", "microsoft/trocr-base-handwritten")
 MAX_IMAGE_BYTES = 20_000_000
+MAX_SEGMENTS = 80
 CONFIDENCE_THRESHOLD = 70.0
-TESSERACT_CONFIG = "--oem 3 --psm 6"
 _BASE_FORMATS = "PNG, JPG, TIFF, BMP, WEBP o GIF"
 SUPPORTED_FORMATS = _BASE_FORMATS + (", HEIC o AVIF" if _HEIF_AVAILABLE else "")
+
+_MODEL_LOCK = threading.Lock()
+_GENERATE_LOCK = threading.Lock()
+_MODEL_STATE: dict[str, object] = {}
 
 _INVENTORY_TOKEN = re.compile(
     r"(?:INV\s*[-.:#]?\s*)?\d+(?:\s*[-–—]\s*(?:INV\s*[-.:#]?\s*)?\d+)?",
     re.IGNORECASE,
 )
-_ONLY_NUMBER_LINE = re.compile(
-    r"^(?:INV\s*[-.:#]?\s*)?\d+(?:\s*[-–—]\s*(?:INV\s*[-.:#]?\s*)?\d+)?$",
+_NUMBER_LIST_LINE = re.compile(
+    r"^(?:\d{1,6}(?:\s*[-–—]\s*\d{1,6})?)"
+    r"(?:[\s,;/]+(?:\d{1,6}(?:\s*[-–—]\s*\d{1,6})?))*$",
     re.IGNORECASE,
 )
+_NUMBER_TOKEN_SPLIT = re.compile(r"[\s,;/]+")
 _LABEL_LINE = re.compile(r"^\s*(?P<label>[^:\-–—]{1,40}?)\s*[:\-–—]\s*(?P<value>.+?)\s*$")
 _YEAR = re.compile(r"\b(1[5-9]\d{2}|20\d{2})\b")
 _IMPRINT_HINT = re.compile(r"\beditorial\b|\bediciones\b|\bed\.\b|\bimprenta\b", re.IGNORECASE)
@@ -81,7 +79,7 @@ class OcrError(Exception):
 
 
 class OcrUnavailable(OcrError):
-    """Tesseract no está disponible en el entorno."""
+    """El modelo TrOCR no está disponible en el entorno."""
 
 
 def normalize_text(value: str) -> str:
@@ -163,11 +161,15 @@ def interpret_ocr_text(
             sources.append(value)
     if not numbers:
         for line in content_lines:
-            if _ONLY_NUMBER_LINE.fullmatch(line):
-                parsed = _try_parse_range(line)
+            if not _NUMBER_LIST_LINE.fullmatch(line):
+                continue
+            for token in _NUMBER_TOKEN_SPLIT.split(line):
+                parsed = _try_parse_range(token)
                 if parsed:
                     numbers.extend(parsed)
-                    sources.append(line)
+                    sources.append(token)
+            if numbers:
+                break
     if not numbers:
         for line in lines:
             for match in _INVENTORY_TOKEN.finditer(line):
@@ -186,7 +188,7 @@ def interpret_ocr_text(
     candidates = [
         line
         for line in content_lines
-        if not _ONLY_NUMBER_LINE.fullmatch(line)
+        if not _NUMBER_LIST_LINE.fullmatch(line)
         and (not section or normalize_text(line) != normalize_text(section))
     ]
     if not imprint:
@@ -244,21 +246,43 @@ def interpret_ocr_text(
     }
 
 
-def _configure_tesseract() -> None:
-    import pytesseract
+def _get_model():
+    """Carga (una sola vez) TrOCR. Devuelve (processor, model)."""
 
-    command = os.environ.get("TESSERACT_CMD", "").strip()
-    if command and os.path.exists(command):
-        pytesseract.pytesseract.tesseract_cmd = command
+    if _MODEL_STATE.get("ready"):
+        return _MODEL_STATE["processor"], _MODEL_STATE["model"]
+    if _MODEL_STATE.get("error"):
+        raise OcrUnavailable(str(_MODEL_STATE["error"]))
+
+    with _MODEL_LOCK:
+        if _MODEL_STATE.get("ready"):
+            return _MODEL_STATE["processor"], _MODEL_STATE["model"]
+        try:
+            import torch
+            from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+        except ImportError as error:
+            _MODEL_STATE["error"] = (
+                "Faltan las librerías torch/transformers en el servidor. "
+                "Recompilá la API: docker compose up --build."
+            )
+            raise OcrUnavailable(str(_MODEL_STATE["error"])) from error
+        try:
+            processor = TrOCRProcessor.from_pretrained(DEFAULT_MODEL)
+            model = VisionEncoderDecoderModel.from_pretrained(DEFAULT_MODEL)
+            torch.set_num_threads(max(1, os.cpu_count() or 2))
+            model.eval()
+        except Exception as error:  # noqa: BLE001 - fallo de descarga/carga del modelo
+            _MODEL_STATE["error"] = f"No se pudo cargar el modelo {DEFAULT_MODEL}: {error}"
+            raise OcrUnavailable(str(_MODEL_STATE["error"])) from error
+        _MODEL_STATE.update(ready=True, processor=processor, model=model)
+        return processor, model
 
 
-def _load_image(data: bytes):
+def _prepare_gray(data: bytes):
     try:
         from PIL import Image, ImageOps, UnidentifiedImageError
     except ImportError as error:
-        raise OcrUnavailable(
-            "Falta la librería Pillow en el servidor para procesar imágenes."
-        ) from error
+        raise OcrUnavailable("Falta la librería Pillow en el servidor.") from error
 
     try:
         image = Image.open(io.BytesIO(data))
@@ -275,108 +299,189 @@ def _load_image(data: bytes):
         image = image.convert("RGB")
     gray = ImageOps.grayscale(image)
     gray = ImageOps.autocontrast(gray)
-    if gray.width and gray.width < 1000:
-        scale = 1000 / gray.width
-        gray = gray.resize((1000, max(1, int(gray.height * scale))))
+    if gray.width > 3000:
+        gray = gray.resize((3000, max(1, int(gray.height * 3000 / gray.width))))
+    elif gray.width < 1600:
+        gray = gray.resize((1600, max(1, int(gray.height * 1600 / gray.width))))
     return gray
 
 
-def _image_to_text(image, languages: str) -> tuple[str, float]:
-    try:
-        import pytesseract
-        from pytesseract import Output, TesseractError, TesseractNotFoundError
-    except ImportError as error:
-        raise OcrUnavailable(
-            "Falta la librería pytesseract en el servidor para leer imágenes."
-        ) from error
+def _segment(gray_image) -> list:
+    """Divide la imagen en renglones/celdas de texto (crops de Pillow)."""
 
-    _configure_tesseract()
-    try:
-        data = pytesseract.image_to_data(
-            image,
-            lang=languages,
-            config=TESSERACT_CONFIG,
-            output_type=Output.DICT,
-        )
-        text = pytesseract.image_to_string(
-            image,
-            lang=languages,
-            config=TESSERACT_CONFIG,
-        )
-    except TesseractNotFoundError as error:
-        raise OcrUnavailable(
-            "Tesseract no está instalado o no se encontró su binario. "
-            "Ejecutá la API con la imagen de Docker que incluye tesseract-ocr "
-            "(docker compose up --build)."
-        ) from error
-    except TesseractError as error:
-        raise OcrError(
-            f"Tesseract no pudo leer la imagen con los idiomas '{languages}': {error}."
-        ) from error
+    import cv2
+    import numpy as np
 
-    confidences = [
-        float(value)
-        for value in data.get("conf", [])
-        if str(value).strip() not in ("", "-1")
-    ]
-    confidence = sum(confidences) / len(confidences) if confidences else 0.0
+    gray = np.array(gray_image)
+    blur = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    height, width = binary.shape
+
+    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(15, width // 15), 1))
+    v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(15, height // 15)))
+    rules = cv2.add(
+        cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel),
+        cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel),
+    )
+    cleaned = cv2.subtract(binary, rules)
+
+    row_sum = (cleaned > 0).sum(axis=1)
+    row_threshold = max(2, int(width * 0.005))
+    bands: list[tuple[int, int]] = []
+    in_band = False
+    start = 0
+    for y, value in enumerate(row_sum):
+        if value > row_threshold and not in_band:
+            in_band, start = True, y
+        elif value <= row_threshold and in_band:
+            in_band = False
+            if y - start >= 10:
+                bands.append((start, y))
+    if in_band:
+        bands.append((start, height))
+
+    crops = []
+    for y0, y1 in bands:
+        band = cleaned[y0:y1, :]
+        col_sum = (band > 0).sum(axis=0)
+        col_threshold = max(1, int((y1 - y0) * 0.04))
+        gap_limit = max(20, width // 40)
+        segments: list[tuple[int, int]] = []
+        in_segment = False
+        seg_start = 0
+        gap = 0
+        for x, value in enumerate(col_sum):
+            if value > col_threshold:
+                if not in_segment:
+                    in_segment, seg_start = True, x
+                gap = 0
+            elif in_segment:
+                gap += 1
+                if gap > gap_limit:
+                    in_segment = False
+                    segments.append((seg_start, x - gap))
+        if in_segment:
+            segments.append((seg_start, width))
+        pad_y = max(4, (y1 - y0) // 5)
+        for x0, x1 in segments:
+            if x1 - x0 < 8:
+                continue
+            crops.append(
+                gray_image.crop(
+                    (max(0, x0 - 6), max(0, y0 - pad_y), min(width, x1 + 6), min(height, y1 + pad_y))
+                )
+            )
+    return crops
+
+
+def _best_orientation(gray_image) -> tuple[list, object]:
+    """Prueba 0/90/180/270 grados y devuelve la segmentación más plausible."""
+
+    best_crops: list = []
+    best_image = gray_image
+    best_score = -1
+    for angle in (0, 90, 180, 270):
+        rotated = gray_image if angle == 0 else gray_image.rotate(angle, expand=True)
+        try:
+            crops = _segment(rotated)
+        except Exception:  # noqa: BLE001 - OpenCV puede fallar; probamos otra orientación
+            crops = []
+        valid = [crop for crop in crops if crop.width > crop.height]
+        if len(valid) > best_score:
+            best_score = len(valid)
+            best_crops = valid
+            best_image = rotated
+    return best_crops, best_image
+
+
+def _recognize(processor, model, image) -> tuple[str, float]:
+    import torch
+
+    pixel_values = processor(images=image, return_tensors="pt").pixel_values
+    with _GENERATE_LOCK, torch.no_grad():
+        outputs = model.generate(
+            pixel_values,
+            max_length=64,
+            output_scores=True,
+            return_dict_in_generate=True,
+        )
+    text = processor.batch_decode(outputs.sequences, skip_special_tokens=True)[0].strip()
+    confidence = 0.0
+    try:
+        transition = model.compute_transition_scores(
+            outputs.sequences, outputs.scores, normalize_logits=True
+        )
+        probs = torch.exp(transition[0])
+        if probs.numel():
+            confidence = float(probs.mean()) * 100.0
+    except Exception:  # noqa: BLE001 - la confianza es informativa
+        confidence = 60.0 if text else 0.0
     return text, confidence
 
 
 def scan_image_bytes(
     data: bytes,
-    languages: str = DEFAULT_LANGUAGES,
     known_sections: list[str] | None = None,
 ) -> dict[str, object]:
     """Lee una imagen escaneada y devuelve una propuesta de campos."""
 
-    image = _load_image(data)
-    text, confidence = _image_to_text(image, languages)
-    result = interpret_ocr_text(text, known_sections)
-    width, height = image.size
-    low_confidence = confidence < CONFIDENCE_THRESHOLD
+    processor, model = _get_model()
+    gray = _prepare_gray(data)
+
+    try:
+        crops, oriented = _best_orientation(gray)
+    except Exception:  # noqa: BLE001 - si OpenCV falta, usamos la imagen completa
+        crops, oriented = [], gray
+    if not crops:
+        crops = [gray]
+
+    lines: list[str] = []
+    confidences: list[float] = []
+    for crop in crops[:MAX_SEGMENTS]:
+        try:
+            text, confidence = _recognize(processor, model, crop)
+        except Exception:  # noqa: BLE001 - una línea ilegible no cancela el resto
+            continue
+        if text:
+            lines.append(text)
+            confidences.append(confidence)
+
+    raw_text = "\n".join(lines)
+    confidence = sum(confidences) / len(confidences) if confidences else 0.0
+    result = interpret_ocr_text(raw_text, known_sections)
+    width, height = oriented.size
+
+    low_confidence = confidence < CONFIDENCE_THRESHOLD or not raw_text.strip()
     warnings = list(result["warnings"])
-    if low_confidence:
-        warnings.insert(
-            0,
-            "La lectura salió con poca confianza; revisá los campos antes de guardar.",
-        )
+    if not raw_text.strip():
+        warnings.insert(0, "No se reconoció texto (¿imagen borrosa o poco iluminada?).")
+    elif low_confidence:
+        warnings.insert(0, "La lectura salió con poca confianza; revisá los campos antes de guardar.")
+
     return {
         **result,
         "status": "low_confidence" if low_confidence else "ok",
+        "engine": "trocr",
         "confidence": round(confidence, 1),
-        "languages": languages,
-        "raw_text": text,
+        "raw_text": raw_text,
         "width": width,
         "height": height,
         "warnings": warnings,
     }
 
 
-def tesseract_status() -> dict[str, object]:
-    binary = os.environ.get("TESSERACT_CMD", "").strip() or shutil.which("tesseract")
+def ocr_status() -> dict[str, object]:
+    available = True
+    detail = None
     try:
-        import pytesseract
-
-        _configure_tesseract()
-        version = str(pytesseract.get_tesseract_version())
-        languages = sorted(pytesseract.get_languages(config=""))
-        return {
-            "available": True,
-            "version": version,
-            "languages": languages,
-            "default_languages": DEFAULT_LANGUAGES,
-            "formats": SUPPORTED_FORMATS,
-            "binary": binary or None,
-            "detail": None,
-        }
-    except Exception as error:  # noqa: BLE001 - se informa cualquier fallo de entorno
-        return {
-            "available": False,
-            "version": None,
-            "languages": [],
-            "default_languages": DEFAULT_LANGUAGES,
-            "formats": SUPPORTED_FORMATS,
-            "binary": binary or None,
-            "detail": str(error),
-        }
+        _get_model()
+    except OcrUnavailable as error:
+        available = False
+        detail = str(error)
+    return {
+        "available": available,
+        "engine": "trocr",
+        "model": DEFAULT_MODEL,
+        "formats": SUPPORTED_FORMATS,
+        "detail": detail,
+    }

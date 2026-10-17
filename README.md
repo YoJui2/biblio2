@@ -33,37 +33,37 @@ MySQL solo es accesible desde la red interna de Docker; no se publica un puerto 
 | `PUT` | `/api/books/{id}` | Actualiza un registro y su rango de ejemplares. |
 | `DELETE` | `/api/books/{id}` | Elimina el registro y sus ejemplares asociados. |
 | `POST` | `/api/import?mode=replace` | Valida y reemplaza el catálogo a partir de un CSV; requiere confirmación si la base ya tiene registros. |
-| `GET` | `/api/ocr/status` | Informa si Tesseract está disponible, su versión y los idiomas instalados. |
+| `GET` | `/api/ocr/status` | Informa si el modelo TrOCR está disponible, cuál es y qué formatos admite. |
 | `POST` | `/api/ocr/scan` | Lee una imagen escaneada y devuelve una propuesta de campos; no persiste nada. |
 
 La interfaz abre en tema oscuro. El botón de sol/luna permite cambiar al tema claro; la selección se guarda aparte de los datos del catálogo.
 
 ## Lectura de imágenes escaneadas (OCR)
 
-Para digitalizar fichas escaneadas sin transcribirlas a mano, el panel usa [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) a través de `pytesseract`. El contenedor de la API ya instala `tesseract-ocr` y el paquete de idioma español (`tesseract-ocr-spa`).
+Para digitalizar fichas escaneadas sin transcribirlas a mano, el panel usa [TrOCR](https://huggingface.co/microsoft/trocr-base-handwritten) (`microsoft/trocr-base-handwritten`), un modelo de *transformers* que lee **escritura manuscrita e impresa**. Es local (no envía la imagen a Internet) y el modelo se descarga al construir la imagen Docker.
 
 1. Elegí **Leer imagen (OCR)** en la barra del panel, o **Cargar imagen** dentro del formulario de registro, y seleccioná una foto o escaneo (PNG, JPG, TIFF, BMP, WEBP, GIF, y HEIC/AVIF para fotos de celular; hasta 20 MB).
-2. La API preprocesa la imagen (escala de grises, autocontraste y reescalado) y ejecuta Tesseract con los idiomas `spa+eng`.
-3. El formulario **Agregar registro** se abre con los campos reconocidos y la imagen de referencia: número de inventario, sección, título, autor, pie de imprenta y encuadernación.
-4. Revisá y corregí los campos, y guardá el registro. **El OCR nunca escribe en la base por su cuenta**: solo propone valores.
+2. La API preprocesa la imagen (escala de grises, autocontraste y reescalado), corrige la orientación (prueba 0°/90°/180°/270°) y **segmenta la ficha en renglones/celdas** con OpenCV, porque TrOCR reconoce líneas y no la página completa.
+3. Cada fragmento se interpreta con TrOCR y el texto se combina en una propuesta de campos.
+4. El formulario **Agregar registro** se abre con los campos reconocidos y la imagen de referencia: número de inventario, sección, título, autor, pie de imprenta y encuadernación.
+5. Revisá y corregí los campos, y guardá el registro. **El OCR nunca escribe en la base por su cuenta**: solo propone valores.
 
-La respuesta de `/api/ocr/scan` incluye `confidence` (confianza media de Tesseract), `raw_text` (texto crudo) y `warnings` (por ejemplo, si no reconoció números de inventario o si la confianza es baja). Las secciones conocidas se envían a la API para mejorar la detección del campo `Sección`.
+La respuesta de `/api/ocr/scan` incluye `engine` (`trocr`), `confidence` (confianza media de lectura), `raw_text` (texto crudo por renglón) y `warnings` (por ejemplo, si no reconoció números de inventario, si no encontró título/autor o si la confianza es baja). Las secciones conocidas del catálogo se envían a la API para mejorar la detección del campo `Sección`.
 
 Configuración opcional en `.env`:
 
 | Variable | Uso |
 | --- | --- |
-| `OCR_LANGUAGES` | Idiomas de Tesseract, por defecto `spa+eng`. |
-| `TESSERACT_CMD` | Ruta al binario `tesseract`; en Docker ya vale `/usr/bin/tesseract`. |
+| `TROCR_MODEL` | Identificador del modelo en Hugging Face; por defecto `microsoft/trocr-base-handwritten`. |
 
-El reconocimiento es una **propuesta**: los rangos repetidos, ilegibles o ambiguos deben corregirse antes de guardar, igual que con la importación por CSV.
+TrOCR es más lento que un OCR clásico y funciona en CPU; la primera lectura puede tardar más porque carga el modelo en memoria. El reconocimiento es una **propuesta**: los rangos repetidos, ilegibles o ambiguos deben corregirse antes de guardar, igual que con la importación por CSV.
 
 ### Formatos y errores
 
 - Formatos admitidos: PNG, JPG, TIFF, BMP, WEBP, GIF y, si `pillow-heif` está instalado, HEIC/HEIF y AVIF (fotos de celular). Consultá la lista en `GET /api/ocr/status` (campo `formats`).
 - Formato no reconocido o imagen ilegible: `422` con un mensaje concreto en el formulario.
 - Archivo que no es imagen: `400`. Imagen mayor a 20 MB: `413`.
-- Tesseract ausente o mal configurado: `503`; el panel avisa que hay que recompilar la API (`docker compose up --build`).
+- Modelo o dependencias ausentes en el servidor: `503` (`GET /api/ocr/status` devuelve `available: false` y el detalle); el panel avisa que hay que recompilar la API (`docker compose build --no-cache api && docker compose up -d`).
 - Si la API no responde, el panel muestra "No se pudo conectar con el servidor" en lugar del error crudo del navegador, y recuerda abrir el panel desde `http://localhost:8000/`.
 
 ## Formato del CSV

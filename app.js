@@ -22,6 +22,8 @@ const elements = {
   ocrPreview: document.querySelector("#ocr-preview"),
   ocrImage: document.querySelector("#ocr-image"),
   ocrNote: document.querySelector("#ocr-note"),
+  ocrAlert: document.querySelector("#ocr-alert"),
+  ocrAlertMessage: document.querySelector("#ocr-alert-message"),
   themeToggle: document.querySelector("#theme-toggle"),
 };
 
@@ -256,9 +258,23 @@ function resetOcrPreview() {
   elements.ocrNote.textContent = "";
 }
 
+function hideOcrAlert() {
+  elements.ocrAlert.hidden = true;
+  elements.ocrAlertMessage.textContent = "";
+}
+
+function showOcrAlert(message, kind = "error") {
+  elements.ocrAlertMessage.textContent = message;
+  elements.ocrAlert.classList.toggle("ocr-alert-error", kind === "error");
+  elements.ocrAlert.classList.toggle("ocr-alert-ok", kind === "ok");
+  elements.ocrAlert.hidden = false;
+  elements.ocrAlert.scrollIntoView({ block: "nearest" });
+}
+
 function openDialog(book = null) {
   editingId = book ? book.id : null;
   resetOcrPreview();
+  hideOcrAlert();
   elements.form.reset();
   elements.formError.hidden = true;
   elements.dialogTitle.textContent = book ? "Editar registro" : "Agregar registro";
@@ -295,13 +311,17 @@ function showOcrSuggestion(result, imageUrl) {
   ocrImageUrl = imageUrl;
   elements.ocrImage.src = imageUrl;
   elements.ocrPreview.hidden = false;
-  const notices = [];
-  if (result.inventory_numbers.length) {
-    notices.push(`Reconocí ${result.inventory_numbers.length} número(s) de inventario.`);
+  const summary = result.inventory_numbers.length
+    ? `Reconocí ${result.inventory_numbers.length} número(s) de inventario.`
+    : "No reconocí números de inventario; completalos a mano.";
+  const motor = result.engine ? ` Motor: ${result.engine}.` : "";
+  elements.ocrNote.textContent = `${summary} Confianza de lectura: ${result.confidence}%.${motor}`;
+  const warnings = result.warnings || [];
+  if (warnings.length) {
+    showOcrAlert(`Lectura completada, revisá lo siguiente: ${warnings.join(" ")}`, "warn");
+  } else {
+    hideOcrAlert();
   }
-  notices.push(...(result.warnings || []));
-  notices.push(`Confianza de lectura: ${result.confidence}%. Revisá y corregí antes de guardar.`);
-  elements.ocrNote.textContent = notices.join(" ");
   elements.form.elements.title.focus();
 }
 
@@ -444,7 +464,7 @@ function describeOcrError(error) {
   if (error.status === 0) return error.message;
   if (error.status === 400) return error.message;
   if (error.status === 413) return error.message;
-  if (error.status === 503) return `Tesseract no está disponible: ${error.message}`;
+  if (error.status === 503) return `El lector TrOCR no está disponible: ${error.message}`;
   if (error.status === 422) return `No se pudo leer la imagen. ${error.message}`;
   if (error.status === 404) return "El servidor no tiene el módulo OCR. Recompilá la API con docker compose up --build.";
   return `No se pudo leer la imagen: ${error.message}`;
@@ -453,12 +473,10 @@ function describeOcrError(error) {
 function reportOcrError(error) {
   console.error("No se pudo leer la imagen escaneada.", error);
   const message = describeOcrError(error);
-  if (elements.dialog.open) {
-    elements.formError.textContent = message;
-    elements.formError.hidden = false;
-  } else {
-    showToast(message);
-  }
+  if (!elements.dialog.open) openDialog();
+  elements.formError.hidden = true;
+  showOcrAlert(message, "error");
+  showToast(message);
 }
 
 async function getOcrStatus() {
@@ -474,13 +492,14 @@ async function getOcrStatus() {
 async function handleOcrFile(file) {
   const imageUrl = URL.createObjectURL(file);
   if (elements.dialog.open) elements.formError.hidden = true;
-  setOcrBusy(true, "Leyendo la imagen con Tesseract…");
+  hideOcrAlert();
+  setOcrBusy(true, "Leyendo la imagen con TrOCR…");
   try {
     validateImageFile(file);
     const status = await getOcrStatus();
     if (status && status.available === false) {
       throw httpError(
-        `Tesseract no está disponible en el servidor. ${status.detail || "Recompilá la API: docker compose up --build."}`,
+        `El lector TrOCR no está disponible en el servidor. ${status.detail || "Recompilá la API: docker compose up --build."}`,
         503,
       );
     }

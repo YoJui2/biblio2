@@ -9,8 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 class Settings(BaseSettings):
     database_url: str
     frontend_dir: Path = PROJECT_ROOT
-    tesseract_cmd: str = ""
-    ocr_languages: str = "spa+eng"
+    trocr_model: str = "microsoft/trocr-base-handwritten"
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
