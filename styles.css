@@ -102,6 +102,10 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; font-w
 .button-export { min-height: 34px; padding: 0 11px; border-color: #e8eae5; background: white; color: #636860; font-size: 11px; }
 .button-export:hover { border-color: #cbd7ca; background: #f8faf7; }
 .button-export svg { width: 15px; height: 15px; }
+.button-danger { min-height: 34px; padding: 0 11px; border-color: #eccfcb; background: #fdf1ef; color: #a4453d; font-size: 11px; }
+.button-danger:hover { border-color: #d9a49e; background: #fbe6e2; }
+.button-danger svg { width: 15px; height: 15px; }
+.button-danger:disabled { opacity: .5; cursor: not-allowed; }
 .toolbar { display: flex; gap: 9px; padding: 0 22px 16px; }
 .search-box, .filter-box { display: flex; min-height: 37px; align-items: center; gap: 8px; border: 1px solid #e9ebe6; border-radius: 6px; background: #fff; color: #9a9e97; }
 .search-box { flex: 1; min-width: 140px; padding: 0 10px; }
@@ -226,6 +230,8 @@ html[data-theme="dark"] .panel-subtitle { color: #929c93; }
 html[data-theme="dark"] .total-pill { background: #303832; color: #bbc3bb; }
 html[data-theme="dark"] .button-export { border-color: #3a443d; background: #252c28; color: #c4ccc4; }
 html[data-theme="dark"] .button-export:hover { border-color: #566b56; background: #2c352e; }
+html[data-theme="dark"] .button-danger { border-color: #6a403c; background: #2e211f; color: #eaa79f; }
+html[data-theme="dark"] .button-danger:hover { border-color: #8a5a54; background: #3a2825; }
 html[data-theme="dark"] .search-box, html[data-theme="dark"] .filter-box { border-color: #3a443d; background: #1c221f; color: #a0aaa1; }
 html[data-theme="dark"] .search-box input { color: #e2e7e1; }
 html[data-theme="dark"] .search-box input::placeholder { color: #78847a; }

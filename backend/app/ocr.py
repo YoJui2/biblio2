@@ -67,13 +67,14 @@ _DEEPSEEK_SYSTEM_PROMPT = (
 _DEEPSEEK_USER_PROMPT = (
     "Transcribí la ficha. Devolvé una línea por campo con este formato exacto y sin "
     "comentarios ni bloques de código:\n"
-    "Ninv: <números de inventario>\n"
+    "Ninv: <todos los números de inventario; si hay varios, separalos por comas>\n"
     "Título: <título de la obra>\n"
     "Autor: <autor, si aparece>\n"
     "Sección: <sección o colección>\n"
     "Pie de imprenta: <ciudad, editorial y año, si aparecen>\n"
     "Encuadernación: <encuadernación u observaciones>\n"
-    "Si un campo no aparece en la imagen, dejalo vacío después de los dos puntos."
+    "Si un campo no aparece en la imagen, dejalo vacío después de los dos puntos. "
+    "No omitas ningún número de inventario, aunque aparezca en varias líneas o columnas."
 )
 
 _MODEL_LOCK = threading.Lock()
@@ -154,6 +155,42 @@ def _try_parse_range(value: str) -> list[int] | None:
         return None
 
 
+def _parse_inventory_value(value: str) -> tuple[list[int], list[str]]:
+    """Extrae todos los números de un valor OCR, sea un rango o una lista."""
+
+    parsed = _try_parse_range(value)
+    if parsed is not None:
+        return parsed, [value.strip()]
+
+    numbers: list[int] = []
+    sources: list[str] = []
+    for match in _INVENTORY_TOKEN.finditer(value):
+        token = match.group(0).strip()
+        parsed = _try_parse_range(token)
+        if parsed:
+            numbers.extend(parsed)
+            sources.append(token)
+    return numbers, sources
+
+
+def _compact_inventory_numbers(numbers: list[int]) -> str:
+    """Representa una lista de números como rangos compactos (62-64, 70)."""
+
+    values = sorted(set(numbers))
+    if not values:
+        return ""
+    parts: list[str] = []
+    start = previous = values[0]
+    for number in values[1:]:
+        if number == previous + 1:
+            previous = number
+            continue
+        parts.append(str(start) if start == previous else f"{start}-{previous}")
+        start = previous = number
+    parts.append(str(start) if start == previous else f"{start}-{previous}")
+    return ", ".join(parts)
+
+
 def _looks_imprint(line: str) -> bool:
     return bool(_YEAR.search(line) or _IMPRINT_HINT.search(line) or " : " in line)
 
@@ -198,10 +235,10 @@ def interpret_ocr_text(
     numbers: list[int] = []
     sources: list[str] = []
     for value in labeled.get("inventory", []):
-        parsed = _try_parse_range(value)
+        parsed, value_sources = _parse_inventory_value(value)
         if parsed:
             numbers.extend(parsed)
-            sources.append(value)
+            sources.extend(value_sources)
     if not numbers:
         for line in content_lines:
             if not _NUMBER_LIST_LINE.fullmatch(line):
@@ -223,7 +260,12 @@ def interpret_ocr_text(
                         numbers.extend(parsed)
                         sources.append(token.strip())
     numbers = sorted(set(numbers))
-    inventory_source = sources[0] if sources else ""
+    if len(sources) == 1:
+        inventory_source = sources[0]
+    elif sources:
+        inventory_source = _compact_inventory_numbers(numbers)
+    else:
+        inventory_source = ""
 
     imprint = labeled.get("imprint", [""])[0]
     binding = labeled.get("binding", [""])[0]

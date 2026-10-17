@@ -54,6 +54,30 @@ def test_health_and_crud_preserve_unique_inventory_numbers(client: TestClient) -
     assert client.get("/api/books").json() == []
 
 
+def test_delete_all_records_clears_catalog(client: TestClient) -> None:
+    payload = {
+        "section": "Literatura",
+        "title": "Libro de prueba",
+        "author": "Autora de prueba",
+        "inventory_numbers": [62, 63],
+        "inventory_source": "62-63",
+    }
+    assert client.post("/api/books", json=payload).status_code == 201
+    assert client.post(
+        "/api/books",
+        json={**payload, "title": "Otro", "inventory_numbers": [70]},
+    ).status_code == 201
+
+    response = client.delete("/api/books")
+    assert response.status_code == 200
+    assert response.json() == {"deleted_records": 2, "deleted_copies": 3}
+    assert client.get("/api/books").json() == []
+
+    empty = client.delete("/api/books")
+    assert empty.status_code == 200
+    assert empty.json() == {"deleted_records": 0, "deleted_copies": 0}
+
+
 def test_csv_import_is_atomic_and_expands_inventory_ranges(client: TestClient) -> None:
     csv_text = (
         "Inventario de prueba\n"

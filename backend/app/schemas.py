@@ -55,6 +55,11 @@ class ImportResult(BaseModel):
     sections: int
 
 
+class DeleteAllResult(BaseModel):
+    deleted_records: int
+    deleted_copies: int
+
+
 class OCRStatus(BaseModel):
     available: bool
     engine: str = "trocr"

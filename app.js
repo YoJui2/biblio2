@@ -142,15 +142,32 @@ function formatInventoryNumber(number) {
 }
 
 function parseInventoryRange(value) {
-  const match = String(value).trim().match(/^(?:INV\s*[-:]?\s*)?(\d+)(?:\s*[-–—]\s*(?:INV\s*[-:]?\s*)?(\d+))?$/i);
-  if (!match) throw new Error("Usá un número o rango, por ejemplo 62 o 62-71.");
-  const start = Number(match[1]);
-  const end = match[2] ? Number(match[2]) : start;
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start) {
-    throw new Error("El rango debe ser ascendente y usar números mayores que cero.");
+  const text = String(value ?? "").trim();
+  if (!text) throw new Error("Usá un número o rango, por ejemplo 62 o 62-71.");
+  const tokenPattern = /(?:INV\s*[-:]?\s*)?(\d+)(?:\s*[-–—]\s*(?:INV\s*[-:]?\s*)?(\d+))?/gi;
+  const numbers = [];
+  let lastIndex = 0;
+  let match;
+  while ((match = tokenPattern.exec(text)) !== null) {
+    const between = text.slice(lastIndex, match.index);
+    if (between && !/^[\s,;/]+$/.test(between)) {
+      throw new Error("Usá números o rangos separados por comas, por ejemplo 62, 65 o 62-71.");
+    }
+    lastIndex = tokenPattern.lastIndex;
+    const start = Number(match[1]);
+    const end = match[2] ? Number(match[2]) : start;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start) {
+      throw new Error("El rango debe ser ascendente y usar números mayores que cero.");
+    }
+    if (end - start >= 10000) throw new Error("El rango no puede superar los 10.000 ejemplares.");
+    for (let number = start; number <= end; number += 1) numbers.push(number);
   }
-  if (end - start >= 10000) throw new Error("El rango no puede superar los 10.000 ejemplares.");
-  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+  const tail = text.slice(lastIndex);
+  if (tail && !/^[\s,;/]*$/.test(tail)) {
+    throw new Error("Usá números o rangos separados por comas, por ejemplo 62, 65 o 62-71.");
+  }
+  if (!numbers.length) throw new Error("Usá un número o rango, por ejemplo 62 o 62-71.");
+  return [...new Set(numbers)].sort((a, b) => a - b);
 }
 
 function inventoryText(numbers) {
@@ -207,6 +224,8 @@ function renderStats() {
     ? `${formatInventoryNumber(Math.min(...allNumbers))} – ${formatInventoryNumber(Math.max(...allNumbers))}`
     : "—";
   document.querySelector("#nav-count").textContent = books.length.toLocaleString("es");
+  const clearButton = document.querySelector("#clear-all-button");
+  if (clearButton) clearButton.disabled = books.length === 0;
 }
 
 function renderBooks() {
@@ -290,8 +309,9 @@ function openDialog(book = null) {
 }
 
 function fillFormFromOcr(result) {
-  const range = result.inventory_source
-    || (result.inventory_numbers.length ? compressNumbers(result.inventory_numbers) : "");
+  const range = result.inventory_numbers.length
+    ? compressNumbers(result.inventory_numbers)
+    : "";
   elements.form.elements.inventoryRange.value = range;
   elements.form.elements.section.value = result.section || "";
   elements.form.elements.title.value = result.title || "";
@@ -396,6 +416,26 @@ async function deleteBook(id) {
     showToast("El registro y sus números se eliminaron del inventario.");
   } catch (error) {
     showToast(`No se pudo eliminar el registro: ${error.message}`);
+  }
+}
+
+async function clearCatalog() {
+  if (!books.length) {
+    showToast("El catálogo ya está vacío.");
+    return;
+  }
+  const copies = books.reduce((total, book) => total + book.inventoryNumbers.length, 0);
+  if (!window.confirm(`¿Borrar los ${books.length} registros y sus ${copies} números de inventario? Esta acción no se puede deshacer.`)) return;
+  if (!window.confirm("Confirmá otra vez: se vaciará todo el catálogo guardado en MySQL.")) return;
+  try {
+    const result = await apiRequest("/api/books", { method: "DELETE" });
+    elements.search.value = "";
+    elements.categoryFilter.value = "";
+    const loaded = await refreshBooks();
+    if (!loaded) return;
+    showToast(`Se borraron ${result.deleted_records} registros y ${result.deleted_copies} ejemplares.`);
+  } catch (error) {
+    showToast(`No se pudo vaciar el catálogo: ${error.message}`);
   }
 }
 
@@ -553,6 +593,7 @@ elements.form.addEventListener("submit", handleSubmit);
 elements.search.addEventListener("input", renderBooks);
 elements.categoryFilter.addEventListener("change", renderBooks);
 document.querySelector("#export-button").addEventListener("click", exportCsv);
+document.querySelector("#clear-all-button").addEventListener("click", clearCatalog);
 document.querySelector("#import-button").addEventListener("click", () => elements.csvInput.click());
 elements.themeToggle.addEventListener("click", toggleTheme);
 elements.dialog.addEventListener("close", resetOcrPreview);

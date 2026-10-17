@@ -46,6 +46,26 @@ def test_interpret_reads_several_numbers_from_one_line() -> None:
     assert result["binding"] == "Cartoné"
 
 
+def test_interpret_reads_labeled_list_of_numbers() -> None:
+    text = (
+        "Ninv: 62, 65, 78, 79\n"
+        "Título: Obra en once tomos\n"
+        "Autor: Autora\n"
+    )
+
+    result = interpret_ocr_text(text)
+
+    assert result["inventory_numbers"] == [62, 65, 78, 79]
+    assert result["inventory_source"] == "62, 65, 78-79"
+
+
+def test_interpret_reads_labeled_range_without_losing_numbers() -> None:
+    result = interpret_ocr_text("Ninv: 62-72\nTítulo: Obra\nAutor: Autora")
+
+    assert result["inventory_numbers"] == list(range(62, 73))
+    assert result["inventory_source"] == "62-72"
+
+
 def test_interpret_detects_known_section_and_title_author() -> None:
     text = "Educación\nMatemática 6\nMaría López\n"
 

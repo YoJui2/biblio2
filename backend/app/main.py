@@ -19,6 +19,7 @@ from app.inventory import (
 )
 from app.models import BibliographicRecord, InventoryCopy
 from app.schemas import (
+    DeleteAllResult,
     ImportResult,
     OCRResult,
     OCRStatus,
@@ -153,6 +154,24 @@ def create_app(
             ) from error
         session.refresh(record)
         return record_to_dict(record)
+
+    @application.delete(
+        "/api/books",
+        response_model=DeleteAllResult,
+        tags=["catálogo"],
+    )
+    def delete_all_records(
+        session: Annotated[Session, Depends(dependency)],
+    ):
+        copies = session.scalar(select(func.count()).select_from(InventoryCopy)) or 0
+        records = (
+            session.scalar(select(func.count()).select_from(BibliographicRecord)) or 0
+        )
+        if records:
+            session.execute(delete(InventoryCopy))
+            session.execute(delete(BibliographicRecord))
+            session.commit()
+        return DeleteAllResult(deleted_records=records, deleted_copies=copies)
 
     @application.delete(
         "/api/books/{record_id}",

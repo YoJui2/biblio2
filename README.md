@@ -32,6 +32,7 @@ MySQL solo es accesible desde la red interna de Docker; no se publica un puerto 
 | `POST` | `/api/books` | Crea un registro y sus ejemplares. |
 | `PUT` | `/api/books/{id}` | Actualiza un registro y su rango de ejemplares. |
 | `DELETE` | `/api/books/{id}` | Elimina el registro y sus ejemplares asociados. |
+| `DELETE` | `/api/books` | Borra **todos** los registros y ejemplares (para pruebas). |
 | `POST` | `/api/import?mode=replace` | Valida y reemplaza el catálogo a partir de un CSV; requiere confirmación si la base ya tiene registros. |
 | `GET` | `/api/ocr/status` | Informa el motor OCR activo (DeepSeek o TrOCR), si está disponible y qué formatos admite. |
 | `POST` | `/api/ocr/scan` | Lee una imagen escaneada y devuelve una propuesta de campos; no persiste nada. |
@@ -47,6 +48,8 @@ Para digitalizar fichas escaneadas sin transcribirlas a mano, el panel usa por d
 3. El texto reconocido se combina en una propuesta de campos.
 4. El formulario **Agregar registro** se abre con los campos reconocidos y la imagen de referencia: número de inventario, sección, título, autor, pie de imprenta y encuadernación.
 5. Revisá y corregí los campos, y guardá el registro. **El OCR nunca escribe en la base por su cuenta**: solo propone valores.
+
+Si la ficha tiene varios números de inventario (un rango como `62-72` o una lista como `62, 65, 78`), el formulario los carga **todos**; el campo acepta números sueltos separados por comas y rangos. Un mismo registro bibliográfico puede tener muchos ejemplares.
 
 La respuesta de `/api/ocr/scan` incluye `engine` (`deepseek` o `trocr`), `confidence`, `raw_text` y `warnings` (por ejemplo, si no reconoció números de inventario, si no encontró título/autor o si la confianza es baja). Las secciones conocidas del catálogo se envían a la API para mejorar la detección del campo `Sección`.
 
@@ -108,6 +111,23 @@ Al exportar, el panel escribe los rangos con prefijos normalizados, por ejemplo 
 5. La API exige un campo explícito de confirmación si MySQL ya tiene registros. Así, un navegador sin datos locales no puede sobrescribir silenciosamente un catálogo existente.
 
 Agregar y editar valida los campos obligatorios y evita asignar números ya utilizados por otro registro. MySQL impone además una restricción única para los números de inventario. Al editar un rango, los números anteriores de ese registro se sustituyen por los nuevos; confirmá que el rango sea el correcto antes de guardar. Eliminar un registro elimina en cascada sus ejemplares.
+
+## Vaciar el catálogo para pruebas
+
+Al testear el panel suele hacer falta empezar de cero. Para eso está el botón **Vaciar catálogo** en la barra del panel (pide dos confirmaciones) y el endpoint `DELETE /api/books`, que borra todos los registros y sus ejemplares en una sola operación:
+
+```powershell
+curl.exe -X DELETE http://localhost:8000/api/books
+```
+
+La respuesta informa qué se borró, por ejemplo `{ "deleted_records": 195, "deleted_copies": 751 }`. Si preferís resetear también la estructura y el volumen de MySQL:
+
+```powershell
+docker compose down -v
+docker compose up --build
+```
+
+**No uses `down -v` si querés conservar datos**: elimina el volumen `mysql_data` completo.
 
 ## Escenarios y manejo actual
 
