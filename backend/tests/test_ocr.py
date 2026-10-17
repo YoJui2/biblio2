@@ -77,7 +77,7 @@ def test_ocr_status_reports_availability(tmp_path) -> None:
     assert response.status_code == 200
     body = response.json()
     assert isinstance(body["available"], bool)
-    assert body["engine"] == "trocr"
+    assert body["engine"] in ("trocr", "deepseek")
     assert body["model"]
     assert "PNG" in (body["formats"] or "")
 

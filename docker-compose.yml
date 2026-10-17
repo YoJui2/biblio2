@@ -24,6 +24,10 @@ services:
       DATABASE_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE}?charset=utf8mb4
       FRONTEND_DIR: /app/ui
       TROCR_MODEL: ${TROCR_MODEL:-microsoft/trocr-base-handwritten}
+      OCR_ENGINE: ${OCR_ENGINE:-deepseek}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

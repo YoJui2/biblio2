@@ -10,13 +10,17 @@ para que la persona los corrija antes de guardarlos.
 
 from __future__ import annotations
 
+import base64
 import io
+import logging
 import os
 import re
 import threading
 import unicodedata
 
 from app.inventory import parse_inventory_range
+
+logger = logging.getLogger(__name__)
 
 try:  # HEIC/HEIF de fotos de celular (dependencia opcional).
     from pillow_heif import register_heif_opener
@@ -27,11 +31,31 @@ except Exception:  # noqa: BLE001 - si no está instalado, seguimos sin HEIC
     _HEIF_AVAILABLE = False
 
 DEFAULT_MODEL = os.environ.get("TROCR_MODEL", "microsoft/trocr-base-handwritten")
+DEFAULT_DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-flash")
+DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 MAX_IMAGE_BYTES = 20_000_000
 MAX_SEGMENTS = 80
+PROBE_SEGMENTS = 6
 CONFIDENCE_THRESHOLD = 70.0
 _BASE_FORMATS = "PNG, JPG, TIFF, BMP, WEBP o GIF"
 SUPPORTED_FORMATS = _BASE_FORMATS + (", HEIC o AVIF" if _HEIF_AVAILABLE else "")
+
+_DEEPSEEK_SYSTEM_PROMPT = (
+    "Sos un transcriptor experto de fichas de inventario de biblioteca escritas a mano. "
+    "Transcribí con fidelidad todo el texto visible de la imagen, respetando mayúsculas, "
+    "acentos y números de inventario, sin inventar ni resumir nada."
+)
+_DEEPSEEK_USER_PROMPT = (
+    "Transcribí la ficha. Devolvé una línea por campo con este formato exacto y sin "
+    "comentarios ni bloques de código:\n"
+    "Ninv: <números de inventario>\n"
+    "Título: <título de la obra>\n"
+    "Autor: <autor, si aparece>\n"
+    "Sección: <sección o colección>\n"
+    "Pie de imprenta: <ciudad, editorial y año, si aparecen>\n"
+    "Encuadernación: <encuadernación u observaciones>\n"
+    "Si un campo no aparece en la imagen, dejalo vacío después de los dos puntos."
+)
 
 _MODEL_LOCK = threading.Lock()
 _GENERATE_LOCK = threading.Lock()
@@ -69,7 +93,7 @@ _LABELS = (
     ("section", r"seccion|area|coleccion"),
     ("title", r"titulo|obra"),
     ("author", r"autor(?:a|es)?"),
-    ("imprint", r"piedeimprenta|imprenta|editorial|edicion|publicacion"),
+    ("imprint", r"pie(?:de)?imprenta|imprenta|editorial|edicion|publicacion|pie"),
     ("binding", r"encuadernacion|observaciones|notas"),
 )
 
@@ -325,6 +349,17 @@ def _segment(gray_image) -> list:
     )
     cleaned = cv2.subtract(binary, rules)
 
+    # Descartamos manchas y estructuras grandes (espiral de encuadernación,
+    # sombras del fondo, bordes). Si no, su altura fusiona todos los renglones
+    # en una sola banda y TrOCR termina leyendo columnas verticales sin texto.
+    component_count, labels, stats, _ = cv2.connectedComponentsWithStats(cleaned, connectivity=8)
+    max_component_height = max(30, int(height * 0.7))
+    max_component_width = max(30, int(width * 0.92))
+    for index in range(1, component_count):
+        _, _, component_w, component_h, _ = stats[index]
+        if component_h > max_component_height or component_w > max_component_width:
+            cleaned[labels == index] = 0
+
     row_sum = (cleaned > 0).sum(axis=1)
     row_threshold = max(2, int(width * 0.005))
     bands: list[tuple[int, int]] = []
@@ -374,29 +409,51 @@ def _segment(gray_image) -> list:
     return crops
 
 
-def _best_orientation(gray_image) -> tuple[list, object]:
-    """Prueba 0/90/180/270 grados y devuelve la segmentación más plausible."""
+def _candidate_orientations(gray_image) -> list[tuple[object, list]]:
+    """Devuelve orientaciones a probar, con su segmentación en renglones.
 
-    best_crops: list = []
-    best_image = gray_image
-    best_score = -1
-    for angle in (0, 90, 180, 270):
+    El orden es solo un desempate: la orientación ganadora se elige luego según
+    la confianza real del reconocimiento, no por una heurística geométrica.
+    """
+
+    candidates: list[tuple[object, list]] = []
+    for angle in (0, 90, 270, 180):
         rotated = gray_image if angle == 0 else gray_image.rotate(angle, expand=True)
         try:
             crops = _segment(rotated)
-        except Exception:  # noqa: BLE001 - OpenCV puede fallar; probamos otra orientación
+        except Exception as error:  # noqa: BLE001 - OpenCV puede faltar; probamos otra
+            logger.info("Segmentación falló a %s°: %s", angle, error)
             crops = []
-        valid = [crop for crop in crops if crop.width > crop.height]
-        if len(valid) > best_score:
-            best_score = len(valid)
-            best_crops = valid
-            best_image = rotated
-    return best_crops, best_image
+        crops = [crop for crop in crops if crop.width > crop.height] or crops
+        candidates.append((rotated, crops))
+    return candidates
+
+
+def _read_crops(
+    processor, model, crops
+) -> tuple[list[str], list[float], str | None]:
+    lines: list[str] = []
+    confidences: list[float] = []
+    first_error: str | None = None
+    for crop in crops:
+        try:
+            text, confidence = _recognize(processor, model, crop)
+        except Exception as error:  # noqa: BLE001 - una línea ilegible no cancela el resto
+            logger.exception("TrOCR no pudo leer un segmento")
+            if first_error is None:
+                first_error = f"{type(error).__name__}: {error}"
+            continue
+        if text:
+            lines.append(text)
+            confidences.append(confidence)
+    return lines, confidences, first_error
 
 
 def _recognize(processor, model, image) -> tuple[str, float]:
     import torch
 
+    if image.mode != "RGB":
+        image = image.convert("RGB")
     pixel_values = processor(images=image, return_tensors="pt").pixel_values
     with _GENERATE_LOCK, torch.no_grad():
         outputs = model.generate(
@@ -419,42 +476,228 @@ def _recognize(processor, model, image) -> tuple[str, float]:
     return text, confidence
 
 
+def _deepseek_api_key() -> str:
+    return (os.environ.get("DEEPSEEK_API_KEY") or "").strip()
+
+
+def _deepseek_base_url() -> str:
+    base = (os.environ.get("DEEPSEEK_BASE_URL") or DEFAULT_DEEPSEEK_BASE_URL).strip()
+    return base.rstrip("/")
+
+
+def _deepseek_model() -> str:
+    return (os.environ.get("DEEPSEEK_MODEL") or DEFAULT_DEEPSEEK_MODEL).strip()
+
+
+def selected_engine() -> str:
+    """Motor OCR activo: 'deepseek' o 'trocr'.
+
+    Se puede forzar con la variable OCR_ENGINE. Si no se define, se usa DeepSeek
+    cuando hay una API key configurada y TrOCR como respaldo.
+    """
+
+    engine = (os.environ.get("OCR_ENGINE") or "").strip().lower()
+    if engine in ("deepseek", "trocr"):
+        return engine
+    return "deepseek" if _deepseek_api_key() else "trocr"
+
+
+def _encode_image_for_api(data: bytes) -> tuple[str, int, int]:
+    """Reencoda la imagen a JPEG y la devuelve en base64 junto a su tamaño."""
+
+    try:
+        from PIL import Image, ImageOps, UnidentifiedImageError
+    except ImportError as error:
+        raise OcrUnavailable("Falta la librería Pillow en el servidor.") from error
+
+    try:
+        image = Image.open(io.BytesIO(data))
+        image.load()
+    except (UnidentifiedImageError, OSError, ValueError) as error:
+        raise OcrError(
+            f"No pude abrir la imagen. Formatos admitidos: {SUPPORTED_FORMATS}."
+        ) from error
+
+    if getattr(image, "is_animated", False):
+        image.seek(0)
+    image = ImageOps.exif_transpose(image).convert("RGB")
+    width, height = image.size
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=92)
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return encoded, width, height
+
+
+def _clean_model_text(text: str) -> str:
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```[a-zA-Z]*\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    return cleaned.strip()
+
+
+def _scan_with_deepseek(
+    data: bytes,
+    known_sections: list[str] | None = None,
+) -> dict[str, object]:
+    """Transcribe la ficha con un modelo de visión de DeepSeek (API OpenAI-compatible)."""
+
+    api_key = _deepseek_api_key()
+    if not api_key:
+        raise OcrUnavailable(
+            "Falta la clave de DeepSeek. Configurá DEEPSEEK_API_KEY en el archivo .env."
+        )
+    model = _deepseek_model()
+    base_url = _deepseek_base_url()
+    encoded, width, height = _encode_image_for_api(data)
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _DEEPSEEK_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": _DEEPSEEK_USER_PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{encoded}",
+                            "detail": "high",
+                        },
+                    },
+                ],
+            },
+        ],
+        "temperature": 0,
+        "stream": False,
+    }
+
+    try:
+        import httpx
+
+        timeout = float(os.environ.get("DEEPSEEK_TIMEOUT", "90"))
+        response = httpx.post(
+            f"{base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=timeout,
+        )
+    except ImportError as error:
+        raise OcrUnavailable("Falta la librería httpx en el servidor.") from error
+    except Exception as error:  # noqa: BLE001 - red/DNS/timeout
+        raise OcrError(f"No pude contactar la API de DeepSeek: {error}") from error
+
+    if response.status_code >= 400:
+        detail = response.text.strip()[:500]
+        raise OcrError(
+            f"La API de DeepSeek respondió con el estado {response.status_code}: {detail}"
+        )
+
+    try:
+        body = response.json()
+        raw_text = _clean_model_text(body["choices"][0]["message"]["content"])
+    except (KeyError, IndexError, TypeError, ValueError) as error:
+        raise OcrError("La respuesta de DeepSeek no tuvo el formato esperado.") from error
+
+    result = interpret_ocr_text(raw_text, known_sections)
+    confidence = 100.0 if raw_text else 0.0
+    logger.info(
+        "OCR DeepSeek (%s): %d línea(s) reconocida(s).",
+        model,
+        len(raw_text.splitlines()),
+    )
+
+    low_confidence = not raw_text
+    warnings = list(result["warnings"])
+    if low_confidence:
+        warnings.insert(0, "El modelo de DeepSeek no devolvió texto para esta imagen.")
+
+    return {
+        **result,
+        "status": "low_confidence" if low_confidence else "ok",
+        "engine": "deepseek",
+        "confidence": round(confidence, 1),
+        "raw_text": raw_text,
+        "width": width,
+        "height": height,
+        "warnings": warnings,
+    }
+
+
 def scan_image_bytes(
     data: bytes,
     known_sections: list[str] | None = None,
 ) -> dict[str, object]:
     """Lee una imagen escaneada y devuelve una propuesta de campos."""
 
+    if selected_engine() == "deepseek":
+        return _scan_with_deepseek(data, known_sections)
+    return _scan_with_trocr(data, known_sections)
+
+
+def _scan_with_trocr(
+    data: bytes,
+    known_sections: list[str] | None = None,
+) -> dict[str, object]:
+    """Lee una imagen escaneada con TrOCR y devuelve una propuesta de campos."""
+
     processor, model = _get_model()
     gray = _prepare_gray(data)
 
     try:
-        crops, oriented = _best_orientation(gray)
-    except Exception:  # noqa: BLE001 - si OpenCV falta, usamos la imagen completa
-        crops, oriented = [], gray
-    if not crops:
-        crops = [gray]
+        candidates = _candidate_orientations(gray)
+    except Exception as error:  # noqa: BLE001 - si OpenCV falta, usamos la imagen completa
+        logger.info("No se pudo segmentar la imagen: %s", error)
+        candidates = [(gray, [gray])]
+    if not candidates:
+        candidates = [(gray, [gray])]
 
-    lines: list[str] = []
-    confidences: list[float] = []
-    for crop in crops[:MAX_SEGMENTS]:
-        try:
-            text, confidence = _recognize(processor, model, crop)
-        except Exception:  # noqa: BLE001 - una línea ilegible no cancela el resto
-            continue
-        if text:
-            lines.append(text)
-            confidences.append(confidence)
+    best_score = -1.0
+    best_pool: list = []
+    best_oriented = gray
+    best_lines: list[str] = []
+    best_confidences: list[float] = []
+    best_error: str | None = None
+    for rotated, crops in candidates:
+        pool = crops or [rotated]
+        lines, confidences, error = _read_crops(processor, model, pool[:PROBE_SEGMENTS])
+        score = sum(confidences)
+        if score > best_score or (score == best_score and len(lines) > len(best_lines)):
+            best_score = score
+            best_oriented = rotated
+            best_pool = pool
+            best_lines = lines
+            best_confidences = confidences
+            best_error = error
+
+    if len(best_pool) > PROBE_SEGMENTS:
+        lines, confidences, best_error = _read_crops(
+            processor, model, best_pool[:MAX_SEGMENTS]
+        )
+    else:
+        lines, confidences = best_lines, best_confidences
 
     raw_text = "\n".join(lines)
     confidence = sum(confidences) / len(confidences) if confidences else 0.0
     result = interpret_ocr_text(raw_text, known_sections)
-    width, height = oriented.size
+    width, height = best_oriented.size
+    logger.info(
+        "OCR: %d segmento(s), %d línea(s), confianza media %.1f%%",
+        len(best_pool),
+        len(lines),
+        confidence,
+    )
 
     low_confidence = confidence < CONFIDENCE_THRESHOLD or not raw_text.strip()
     warnings = list(result["warnings"])
     if not raw_text.strip():
         warnings.insert(0, "No se reconoció texto (¿imagen borrosa o poco iluminada?).")
+        if best_error:
+            warnings.append(f"Detalle del lector: {best_error}")
     elif low_confidence:
         warnings.insert(0, "La lectura salió con poca confianza; revisá los campos antes de guardar.")
 
@@ -471,6 +714,19 @@ def scan_image_bytes(
 
 
 def ocr_status() -> dict[str, object]:
+    engine = selected_engine()
+    if engine == "deepseek":
+        available = bool(_deepseek_api_key())
+        return {
+            "available": available,
+            "engine": "deepseek",
+            "model": _deepseek_model(),
+            "formats": SUPPORTED_FORMATS,
+            "detail": None
+            if available
+            else "Falta DEEPSEEK_API_KEY. Configurá la clave en el archivo .env.",
+        }
+
     available = True
     detail = None
     try:
