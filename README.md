@@ -33,30 +33,34 @@ MySQL solo es accesible desde la red interna de Docker; no se publica un puerto 
 | `PUT` | `/api/books/{id}` | Actualiza un registro y su rango de ejemplares. |
 | `DELETE` | `/api/books/{id}` | Elimina el registro y sus ejemplares asociados. |
 | `POST` | `/api/import?mode=replace` | Valida y reemplaza el catálogo a partir de un CSV; requiere confirmación si la base ya tiene registros. |
-| `GET` | `/api/ocr/status` | Informa si el modelo TrOCR está disponible, cuál es y qué formatos admite. |
+| `GET` | `/api/ocr/status` | Informa el motor OCR activo (DeepSeek o TrOCR), si está disponible y qué formatos admite. |
 | `POST` | `/api/ocr/scan` | Lee una imagen escaneada y devuelve una propuesta de campos; no persiste nada. |
 
 La interfaz abre en tema oscuro. El botón de sol/luna permite cambiar al tema claro; la selección se guarda aparte de los datos del catálogo.
 
 ## Lectura de imágenes escaneadas (OCR)
 
-Para digitalizar fichas escaneadas sin transcribirlas a mano, el panel usa [TrOCR](https://huggingface.co/microsoft/trocr-base-handwritten) (`microsoft/trocr-base-handwritten`), un modelo de *transformers* que lee **escritura manuscrita e impresa**. Es local (no envía la imagen a Internet) y el modelo se descarga al construir la imagen Docker.
+Para digitalizar fichas escaneadas sin transcribirlas a mano, el panel usa por defecto un **modelo de visión de DeepSeek** (`deepseek-flash`) a través de su API compatible con OpenAI. El modelo transcribe la ficha completa y el resultado se interpreta como una propuesta de campos. Como respaldo local se mantiene [TrOCR](https://huggingface.co/microsoft/trocr-base-handwritten) (`microsoft/trocr-base-handwritten`), que lee **escritura manuscrita e impresa** segmentando la imagen en renglones.
 
 1. Elegí **Leer imagen (OCR)** en la barra del panel, o **Cargar imagen** dentro del formulario de registro, y seleccioná una foto o escaneo (PNG, JPG, TIFF, BMP, WEBP, GIF, y HEIC/AVIF para fotos de celular; hasta 20 MB).
-2. La API preprocesa la imagen (escala de grises, autocontraste y reescalado), corrige la orientación (prueba 0°/90°/180°/270°) y **segmenta la ficha en renglones/celdas** con OpenCV, porque TrOCR reconoce líneas y no la página completa.
-3. Cada fragmento se interpreta con TrOCR y el texto se combina en una propuesta de campos.
+2. La API reencoda la imagen a JPEG y la envía al modelo de visión de DeepSeek con una consigna que devuelve una línea por campo (Ninv, Título, Autor, Sección, Pie de imprenta, Encuadernación).
+3. El texto reconocido se combina en una propuesta de campos.
 4. El formulario **Agregar registro** se abre con los campos reconocidos y la imagen de referencia: número de inventario, sección, título, autor, pie de imprenta y encuadernación.
 5. Revisá y corregí los campos, y guardá el registro. **El OCR nunca escribe en la base por su cuenta**: solo propone valores.
 
-La respuesta de `/api/ocr/scan` incluye `engine` (`trocr`), `confidence` (confianza media de lectura), `raw_text` (texto crudo por renglón) y `warnings` (por ejemplo, si no reconoció números de inventario, si no encontró título/autor o si la confianza es baja). Las secciones conocidas del catálogo se envían a la API para mejorar la detección del campo `Sección`.
+La respuesta de `/api/ocr/scan` incluye `engine` (`deepseek` o `trocr`), `confidence`, `raw_text` y `warnings` (por ejemplo, si no reconoció números de inventario, si no encontró título/autor o si la confianza es baja). Las secciones conocidas del catálogo se envían a la API para mejorar la detección del campo `Sección`.
 
-Configuración opcional en `.env`:
+Configuración en `.env`:
 
 | Variable | Uso |
 | --- | --- |
-| `TROCR_MODEL` | Identificador del modelo en Hugging Face; por defecto `microsoft/trocr-base-handwritten`. |
+| `OCR_ENGINE` | Motor activo: `deepseek` o `trocr`. Si se deja vacío, usa DeepSeek cuando hay API key y TrOCR como respaldo. |
+| `DEEPSEEK_API_KEY` | Clave de la API de DeepSeek. **Pegá tu clave acá.** |
+| `DEEPSEEK_BASE_URL` | URL base de la API; por defecto `https://api.deepseek.com`. |
+| `DEEPSEEK_MODEL` | Modelo de visión; por defecto `deepseek-flash`. |
+| `TROCR_MODEL` | Modelo local de respaldo en Hugging Face; por defecto `microsoft/trocr-base-handwritten`. |
 
-TrOCR es más lento que un OCR clásico y funciona en CPU; la primera lectura puede tardar más porque carga el modelo en memoria. El reconocimiento es una **propuesta**: los rangos repetidos, ilegibles o ambiguos deben corregirse antes de guardar, igual que con la importación por CSV.
+La primera lectura con TrOCR puede tardar más porque carga el modelo en memoria. El reconocimiento es una **propuesta**: los rangos repetidos, ilegibles o ambiguos deben corregirse antes de guardar, igual que con la importación por CSV.
 
 ### Formatos y errores
 

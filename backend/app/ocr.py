@@ -1,9 +1,10 @@
-"""Lectura OCR de fichas escaneadas con TrOCR (Microsoft).
+"""Lectura OCR de fichas escaneadas.
 
-TrOCR reconoce **líneas** de texto manuscrito o impreso. Para leer una ficha
-completa, este módulo segmenta la imagen en renglones (y columnas) y reconoce
-cada fragmento; después interpreta el texto como una **propuesta editable**.
+Motor principal: la API de visión de DeepSeek (formato OpenAI-compatible), que
+transcribe la ficha completa. Respaldo local: TrOCR (Microsoft), que reconoce
+**líneas** de texto manuscrito o impreso y requiere segmentar la imagen.
 
+En ambos casos el texto reconocido se interpreta como una **propuesta editable**.
 Nunca persiste datos: la interfaz muestra la imagen y los campos reconocidos
 para que la persona los corrija antes de guardarlos.
 """
@@ -17,10 +18,28 @@ import os
 import re
 import threading
 import unicodedata
+from pathlib import Path
 
 from app.inventory import parse_inventory_range
 
 logger = logging.getLogger(__name__)
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+try:  # Permite leer la API key desde .env al correr la API fuera de Docker.
+    from dotenv import dotenv_values
+
+    _DOTENV_VALUES = dotenv_values(_PROJECT_ROOT / ".env")
+except Exception:  # noqa: BLE001 - sin python-dotenv usamos solo el entorno
+    _DOTENV_VALUES = {}
+
+
+def _setting(name: str, default: str = "") -> str:
+    value = os.environ.get(name)
+    if not value:
+        value = _DOTENV_VALUES.get(name)
+    if not value:
+        return default
+    return str(value).strip()
 
 try:  # HEIC/HEIF de fotos de celular (dependencia opcional).
     from pillow_heif import register_heif_opener
@@ -477,16 +496,16 @@ def _recognize(processor, model, image) -> tuple[str, float]:
 
 
 def _deepseek_api_key() -> str:
-    return (os.environ.get("DEEPSEEK_API_KEY") or "").strip()
+    return _setting("DEEPSEEK_API_KEY")
 
 
 def _deepseek_base_url() -> str:
-    base = (os.environ.get("DEEPSEEK_BASE_URL") or DEFAULT_DEEPSEEK_BASE_URL).strip()
+    base = _setting("DEEPSEEK_BASE_URL", DEFAULT_DEEPSEEK_BASE_URL)
     return base.rstrip("/")
 
 
 def _deepseek_model() -> str:
-    return (os.environ.get("DEEPSEEK_MODEL") or DEFAULT_DEEPSEEK_MODEL).strip()
+    return _setting("DEEPSEEK_MODEL", DEFAULT_DEEPSEEK_MODEL)
 
 
 def selected_engine() -> str:
@@ -496,7 +515,7 @@ def selected_engine() -> str:
     cuando hay una API key configurada y TrOCR como respaldo.
     """
 
-    engine = (os.environ.get("OCR_ENGINE") or "").strip().lower()
+    engine = _setting("OCR_ENGINE").lower()
     if engine in ("deepseek", "trocr"):
         return engine
     return "deepseek" if _deepseek_api_key() else "trocr"
@@ -576,7 +595,7 @@ def _scan_with_deepseek(
     try:
         import httpx
 
-        timeout = float(os.environ.get("DEEPSEEK_TIMEOUT", "90"))
+        timeout = float(_setting("DEEPSEEK_TIMEOUT", "90"))
         response = httpx.post(
             f"{base_url}/chat/completions",
             headers={

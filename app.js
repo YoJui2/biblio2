@@ -464,7 +464,7 @@ function describeOcrError(error) {
   if (error.status === 0) return error.message;
   if (error.status === 400) return error.message;
   if (error.status === 413) return error.message;
-  if (error.status === 503) return `El lector TrOCR no está disponible: ${error.message}`;
+  if (error.status === 503) return `El lector OCR no está disponible: ${error.message}`;
   if (error.status === 422) return `No se pudo leer la imagen. ${error.message}`;
   if (error.status === 404) return "El servidor no tiene el módulo OCR. Recompilá la API con docker compose up --build.";
   return `No se pudo leer la imagen: ${error.message}`;
@@ -493,13 +493,13 @@ async function handleOcrFile(file) {
   const imageUrl = URL.createObjectURL(file);
   if (elements.dialog.open) elements.formError.hidden = true;
   hideOcrAlert();
-  setOcrBusy(true, "Leyendo la imagen con TrOCR…");
+  setOcrBusy(true, "Leyendo la imagen…");
   try {
     validateImageFile(file);
     const status = await getOcrStatus();
     if (status && status.available === false) {
       throw httpError(
-        `El lector TrOCR no está disponible en el servidor. ${status.detail || "Recompilá la API: docker compose up --build."}`,
+        `El lector ${status.engine || "OCR"} no está disponible en el servidor. ${status.detail || "Recompilá la API: docker compose up --build."}`,
         503,
       );
     }
