@@ -10,7 +10,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app import ocr
+from app import chatbot, ocr
 from app.config import PROJECT_ROOT, Settings
 from app.db import Base, make_session_factory, session_dependency
 from app.inventory import (
@@ -21,6 +21,9 @@ from app.inventory import (
 from app.models import BibliographicRecord, InventoryCopy
 from app.schemas import (
     BulkCreateResult,
+    ChatReply,
+    ChatRequest,
+    ChatbotStatus,
     DeleteAllResult,
     ImportResult,
     OCRScanResult,
@@ -499,6 +502,39 @@ def create_app(
                 status_code=500,
                 detail=f"Error inesperado al leer la imagen: {error}",
             ) from error
+
+    @application.get(
+        "/api/chat/status",
+        response_model=ChatbotStatus,
+        tags=["chatbot"],
+    )
+    def chatbot_status() -> dict[str, object]:
+        return chatbot.chatbot_status()
+
+    @application.post(
+        "/api/chat",
+        response_model=ChatReply,
+        tags=["chatbot"],
+    )
+    def ask_chatbot(
+        payload: ChatRequest,
+        session: Annotated[Session, Depends(dependency)],
+    ):
+        records = session.scalars(
+            select(BibliographicRecord)
+            .where(BibliographicRecord.deleted_at.is_(None))
+            .options(selectinload(BibliographicRecord.copies))
+            .order_by(BibliographicRecord.id)
+        ).all()
+        catalog = [record_to_dict(record) for record in records]
+        history = [message.model_dump() for message in payload.history]
+        try:
+            result = chatbot.answer_question(catalog, payload.message, history)
+        except chatbot.ChatbotUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        except chatbot.ChatbotError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        return ChatReply(reply=result["reply"], model=result["model"])
 
     @application.get("/", include_in_schema=False)
     def index():

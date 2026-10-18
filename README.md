@@ -41,6 +41,8 @@ MySQL solo es accesible desde la red interna de Docker; no se publica un puerto 
 | `POST` | `/api/import?mode=replace` | Valida y reemplaza el catálogo a partir de un CSV; requiere confirmación si la base ya tiene registros. |
 | `GET` | `/api/ocr/status` | Informa el motor OCR activo (DeepSeek o TrOCR), si está disponible y qué formatos admite. |
 | `POST` | `/api/ocr/scan` | Lee una imagen escaneada y devuelve una o más propuestas de registro; no persiste nada. |
+| `GET` | `/api/chat/status` | Informa el modelo de chat activo y si hay una API key configurada. |
+| `POST` | `/api/chat` | Responde una consulta sobre el inventario con DeepSeek usando solo los datos del catálogo. |
 
 La interfaz abre en tema oscuro. El botón de sol/luna permite cambiar al tema claro; la selección se guarda aparte de los datos del catálogo.
 
@@ -67,7 +69,8 @@ Configuración en `.env`:
 | `OCR_ENGINE` | Motor activo: `deepseek` o `trocr`. Si se deja vacío, usa DeepSeek cuando hay API key y TrOCR como respaldo. |
 | `DEEPSEEK_API_KEY` | Clave de la API de DeepSeek. **Pegá tu clave acá.** |
 | `DEEPSEEK_BASE_URL` | URL base de la API; por defecto `https://api.deepseek.com`. |
-| `DEEPSEEK_MODEL` | Modelo de visión; por defecto `deepseek-flash`. |
+| `DEEPSEEK_MODEL` | Modelo de visión del OCR; por defecto `deepseek-flash`. |
+| `DEEPSEEK_CHAT_MODEL` | Modelo del ChatBot; por defecto `deepseek-chat`, el más económico. |
 | `TROCR_MODEL` | Modelo local de respaldo en Hugging Face; por defecto `microsoft/trocr-base-handwritten`. |
 
 La primera lectura con TrOCR puede tardar más porque carga el modelo en memoria. El reconocimiento es una **propuesta**: los rangos repetidos, ilegibles o ambiguos deben corregirse antes de guardar, igual que con la importación por CSV.
@@ -79,6 +82,19 @@ La primera lectura con TrOCR puede tardar más porque carga el modelo en memoria
 - Archivo que no es imagen: `400`. Imagen mayor a 20 MB: `413`.
 - Modelo o dependencias ausentes en el servidor: `503` (`GET /api/ocr/status` devuelve `available: false` y el detalle); el panel avisa que hay que recompilar la API (`docker compose build --no-cache api && docker compose up -d`).
 - Si la API no responde, el panel muestra "No se pudo conectar con el servidor" en lugar del error crudo del navegador, y recuerda abrir el panel desde `http://localhost:8000/`.
+
+## ChatBot del inventario
+
+En el menú principal, debajo de **Inventario**, está **ChatBot**: un asistente que responde preguntas sobre el catálogo en lenguaje natural. Antes de cada consulta, la API arma un **resumen** del inventario (registros, ejemplares y secciones) y un listado compacto de las fichas (`INV-000062 | Sección | «Título» | Autor | Pie de imprenta | Encuadernación`). Ese contexto se envía a la API de DeepSeek con el **modelo de chat más económico** (`deepseek-chat`) y el asistente responde **solo con esos datos**.
+
+- **Responde** por título, autor, sección, pie de imprenta o número de inventario; también puede contar registros y ejemplares.
+- Si el libro **no está en el catálogo**, lo dice y sugiere revisar el título, el autor o la sección.
+- Si **no entiende la pregunta**, pide que la reformulen en lugar de adivinar.
+- No inventa disponibilidad ni préstamos: del ejemplar solo se conoce la encuadernación u observaciones.
+- La conversación recentísima se envía como historial para dar contexto, y se mantiene **en el navegador**: al recargar o pulsar **Limpiar chat** se reinicia.
+- Si falta `DEEPSEEK_API_KEY`, `GET /api/chat/status` devuelve `available: false` y el panel lo avisa.
+
+`POST /api/chat` recibe `{ "message": "...", "history": [{ "role": "user|assistant", "content": "..." }] }` y devuelve `{ "reply": "...", "model": "deepseek-chat" }`. El asistente **no modifica** la base: solo lee el catálogo.
 
 ## Formato del CSV
 
@@ -192,8 +208,8 @@ El CSV agrupa varios números bajo un mismo registro bibliográfico. Esto modela
 
 - [`index.html`](./index.html): estructura y formulario.
 - [`styles.css`](./styles.css): estilos y temas claro/oscuro.
-- [`app.js`](./app.js): operaciones CRUD, validación, CSV, OCR y llamadas a la API.
-- [`backend/app/`](./backend/app/): API FastAPI, modelos, validación, importación y OCR.
+- [`app.js`](./app.js): operaciones CRUD, validación, CSV, OCR, ChatBot y llamadas a la API.
+- [`backend/app/`](./backend/app/): API FastAPI, modelos, validación, importación, OCR y ChatBot.
 - [`backend/migrations/`](./backend/migrations/): migraciones versionadas con Alembic.
 - [`backend/tests/`](./backend/tests/): pruebas de importación, API y migraciones.
 - [`backend/requirements.txt`](./backend/requirements.txt): dependencias de la API, instaladas durante la construcción de la imagen Docker.

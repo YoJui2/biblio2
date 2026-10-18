@@ -40,6 +40,17 @@ const elements = {
   scanPreview: document.querySelector("#scan-preview"),
   scanImage: document.querySelector("#scan-image"),
   scanNote: document.querySelector("#scan-note"),
+  inventoryView: document.querySelector("#inventory-view"),
+  chatPanel: document.querySelector("#chatbot"),
+  chatLog: document.querySelector("#chat-log"),
+  chatForm: document.querySelector("#chat-form"),
+  chatInput: document.querySelector("#chat-input"),
+  chatSendButton: document.querySelector("#chat-send-button"),
+  chatClearButton: document.querySelector("#chat-clear-button"),
+  chatStatus: document.querySelector("#chat-status"),
+  chatModelPill: document.querySelector("#chat-model-pill"),
+  chatSuggestions: document.querySelector("#chat-suggestions"),
+  breadcrumbCurrent: document.querySelector("#breadcrumb-current"),
 };
 
 let books = [];
@@ -49,6 +60,11 @@ let toastTimeout;
 let ocrImageUrl = null;
 let scanImageUrl = null;
 let scanRecords = [];
+let chatHistory = [];
+let chatBusy = false;
+let chatStarted = false;
+
+const CHAT_WELCOME = "Hola, soy el asistente del inventario. Preguntame por un título, un autor, una sección o un número como INV-000062. Si el libro no está en el catálogo, te lo digo.";
 
 function applyTheme(theme) {
   const selectedTheme = theme === "light" ? "light" : "dark";
@@ -868,6 +884,106 @@ function exportCsv() {
   showToast("Se exportó la vista actual en el formato de tu catálogo.");
 }
 
+function appendChatMessage(role, text) {
+  const wrapper = document.createElement("div");
+  wrapper.className = `chat-message ${role}`;
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble";
+  const label = document.createElement("span");
+  label.className = "chat-role";
+  label.textContent = role === "user" ? "Vos" : role === "error" ? "Error" : "ChatBot";
+  const content = document.createElement("span");
+  content.textContent = text;
+  bubble.append(label, content);
+  wrapper.append(bubble);
+  elements.chatLog.append(wrapper);
+  elements.chatLog.scrollTop = elements.chatLog.scrollHeight;
+  return wrapper;
+}
+
+function resetChat() {
+  chatHistory = [];
+  chatBusy = false;
+  elements.chatLog.innerHTML = "";
+  appendChatMessage("assistant", CHAT_WELCOME);
+}
+
+async function loadChatStatus() {
+  try {
+    const status = await apiRequest("/api/chat/status");
+    if (status.model) elements.chatModelPill.textContent = status.model;
+    elements.chatStatus.classList.toggle("error", status.available === false);
+    elements.chatStatus.textContent = status.available
+      ? `Modelo económico: ${status.model}`
+      : status.detail || "El asistente no está disponible.";
+  } catch (error) {
+    elements.chatStatus.classList.add("error");
+    elements.chatStatus.textContent = "No se pudo consultar el estado del asistente.";
+  }
+}
+
+async function sendChatQuestion(question) {
+  const text = String(question ?? "").trim();
+  if (!text || chatBusy) return;
+  chatBusy = true;
+  elements.chatSendButton.disabled = true;
+  elements.chatStatus.classList.remove("error");
+  elements.chatStatus.textContent = "Consultando el inventario…";
+  appendChatMessage("user", text);
+  const pending = appendChatMessage("assistant", "Pensando…");
+  pending.querySelector(".chat-bubble").classList.add("chat-typing");
+  try {
+    const result = await apiRequest("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text, history: chatHistory.slice(-8) }),
+    });
+    pending.remove();
+    appendChatMessage("assistant", result.reply);
+    chatHistory.push({ role: "user", content: text });
+    chatHistory.push({ role: "assistant", content: result.reply });
+    chatHistory = chatHistory.slice(-8);
+    elements.chatStatus.classList.remove("error");
+    elements.chatStatus.textContent = `Modelo económico: ${result.model}`;
+  } catch (error) {
+    pending.remove();
+    appendChatMessage("error", error.message);
+    elements.chatStatus.classList.add("error");
+    elements.chatStatus.textContent = error.status === 0
+      ? "Sin conexión con el servidor."
+      : "El asistente no pudo responder.";
+  } finally {
+    chatBusy = false;
+    elements.chatSendButton.disabled = false;
+    elements.chatInput.focus();
+  }
+}
+
+function setView(view) {
+  const target = view === "chatbot" ? "chatbot" : "inventory";
+  if (elements.inventoryView) elements.inventoryView.hidden = target !== "inventory";
+  if (elements.chatPanel) elements.chatPanel.hidden = target !== "chatbot";
+  document.querySelectorAll(".nav-link[data-view]").forEach((link) => {
+    const active = link.dataset.view === target;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+  if (elements.breadcrumbCurrent) {
+    elements.breadcrumbCurrent.textContent = target === "chatbot" ? "ChatBot" : "Inventario";
+  }
+  if (target === "chatbot") {
+    if (!chatStarted) {
+      chatStarted = true;
+      resetChat();
+      loadChatStatus();
+    }
+    elements.chatInput.focus();
+  } else {
+    document.querySelectorAll(".row-menu").forEach((menu) => menu.remove());
+  }
+}
+
 document.querySelector("#add-book-button").addEventListener("click", () => openDialog());
 document.querySelector("#empty-add-button").addEventListener("click", () => openDialog());
 document.querySelector("#cancel-button").addEventListener("click", () => elements.dialog.close());
@@ -965,8 +1081,29 @@ document.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
+    setView("inventory");
     elements.search.focus();
   }
+});
+
+document.querySelectorAll(".nav-link[data-view]").forEach((link) => {
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    setView(link.dataset.view);
+  });
+});
+
+elements.chatForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const text = elements.chatInput.value;
+  elements.chatInput.value = "";
+  sendChatQuestion(text);
+});
+elements.chatClearButton?.addEventListener("click", () => resetChat());
+elements.chatSuggestions?.addEventListener("click", (event) => {
+  const chip = event.target.closest(".chat-chip");
+  if (!chip) return;
+  sendChatQuestion(chip.dataset.question);
 });
 
 document.querySelector("#today").textContent = new Intl.DateTimeFormat("es-AR", {

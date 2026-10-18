@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -113,3 +114,32 @@ class OCRScanResult(BaseModel):
     height: int
     records: list[OCRRecord] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=20)
+
+    @field_validator("message")
+    @classmethod
+    def message_is_not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Escribí una pregunta sobre el inventario.")
+        return value
+
+
+class ChatReply(BaseModel):
+    reply: str
+    model: str
+
+
+class ChatbotStatus(BaseModel):
+    available: bool
+    model: str
+    detail: str | None = None
