@@ -72,10 +72,10 @@ Configuración en `.env`:
 | `DEEPSEEK_API_KEY` | Clave de la API de DeepSeek. **Pegá tu clave acá.** |
 | `DEEPSEEK_BASE_URL` | URL base de la API; por defecto `https://api.deepseek.com`. |
 | `DEEPSEEK_MODEL` | Modelo de visión del OCR; por defecto `deepseek-flash`. |
-| `DEEPSEEK_CHAT_MODEL` | Modelo del ChatBot; por defecto `deepseek-chat`, el más económico de DeepSeek. |
-| `CHATBOT_API_KEY` | Clave del proveedor del ChatBot (opcional; en blanco usa `DEEPSEEK_API_KEY`). |
-| `CHATBOT_BASE_URL` | URL base OpenAI-compatible del ChatBot (opcional; en blanco usa `DEEPSEEK_BASE_URL`). |
-| `CHATBOT_MODEL` | Modelo de chat (opcional; en blanco usa `DEEPSEEK_CHAT_MODEL`). |
+| `DEEPSEEK_CHAT_MODEL` | Modelo del ChatBot si `CHATBOT_*` está en blanco; por defecto `deepseek-chat`. |
+| `CHATBOT_API_KEY` | Clave del proveedor del ChatBot. Para Gemini, una clave `AIza…`. |
+| `CHATBOT_BASE_URL` | URL base OpenAI-compatible del ChatBot; por defecto la de Gemini (`https://generativelanguage.googleapis.com/v1beta/openai/`). |
+| `CHATBOT_MODEL` | Modelo de chat; por defecto `gemini-2.5-flash`. |
 | `LIBRARY_CONTEXT_DIR` | Carpeta con la base de conocimiento institucional; por defecto `./Entrevistas_Contexto`. |
 | `TROCR_MODEL` | Modelo local de respaldo en Hugging Face; por defecto `microsoft/trocr-base-handwritten`. |
 
@@ -91,7 +91,7 @@ La primera lectura con TrOCR puede tardar más porque carga el modelo en memoria
 
 ## ChatBot del inventario
 
-En el menú principal, debajo de **Inventario**, está **ChatBot**: un asistente que responde preguntas sobre el catálogo y sobre el funcionamiento interno de la biblioteca en lenguaje natural. Antes de cada consulta, la API arma un **resumen** del inventario (registros, ejemplares y rango de inventario) y un listado compacto de las fichas (`INV-000062 | «Título» | Autor | Pie de imprenta | Encuadernación`). Ese contexto más la **base de conocimiento institucional** se envían a la API de DeepSeek con el **modelo de chat más económico** (`deepseek-chat`), y el asistente responde **solo con esos datos**.
+En el menú principal, debajo de **Inventario**, está **ChatBot**: un asistente que responde preguntas sobre el catálogo y sobre el funcionamiento interno de la biblioteca en lenguaje natural. Antes de cada consulta, la API arma un **resumen** del inventario (registros, ejemplares y rango de inventario) y un listado compacto de las fichas (`INV-000062 | «Título» | Autor | Pie de imprenta | Encuadernación`). Ese contexto más la **base de conocimiento institucional** se envían a un proveedor OpenAI-compatible —por defecto **Google Gemini** con `gemini-2.5-flash`— y el asistente responde **solo con esos datos**.
 
 - **Formato:** el asistente responde en Markdown con un tono humano; el panel lo **renderiza** (negritas, viñetas y **tablas**), así que para listar varios libros muestra una tabla con `Nº inv.` y `Título`.
 - **Inventario:** responde por título, autor, pie de imprenta o número de inventario; también puede contar registros y ejemplares.
@@ -100,7 +100,8 @@ En el menú principal, debajo de **Inventario**, está **ChatBot**: un asistente
 - No inventa disponibilidad ni préstamos: del ejemplar solo se conoce la encuadernación u observaciones. Si las normas internas y el inventario se contradicen sobre disponibilidad, prioriza el inventario.
 - La conversación recentísima se envía como historial para dar contexto, y se mantiene **en el navegador**: al recargar o pulsar **Limpiar chat** se reinicia.
 - Si falta la API key (`CHATBOT_API_KEY` o `DEEPSEEK_API_KEY`), `GET /api/chat/status` devuelve `available: false` y el panel lo avisa.
-- El ChatBot puede usar **cualquier proveedor compatible con OpenAI** definiendo `CHATBOT_API_KEY`, `CHATBOT_BASE_URL` y `CHATBOT_MODEL`. Si se dejan en blanco, usa DeepSeek con `deepseek-chat`.
+- Por defecto el ChatBot usa **Google Gemini** (`gemini-2.5-flash`): pegá tu clave `AIza…` en `CHATBOT_API_KEY`. El OCR sigue usando DeepSeek.
+- El ChatBot puede usar **cualquier proveedor compatible con OpenAI** cambiando `CHATBOT_API_KEY`, `CHATBOT_BASE_URL` y `CHATBOT_MODEL`. Si dejás `CHATBOT_*` en blanco, usa DeepSeek con `deepseek-chat`.
 
 ### Base de conocimiento institucional
 

@@ -326,7 +326,7 @@ def chatbot_status() -> dict[str, object]:
         "context_files": context_files,
         "detail": None
         if available
-        else "Falta CHATBOT_API_KEY (o DEEPSEEK_API_KEY). Configurá la clave en .env.",
+        else "Falta CHATBOT_API_KEY. Configurá la clave del asistente en .env.",
     }
 
 
@@ -344,8 +344,8 @@ def answer_question(
     api_key = _api_key()
     if not api_key:
         raise ChatbotUnavailable(
-            "Falta la clave del asistente. Configurá CHATBOT_API_KEY "
-            "(o DEEPSEEK_API_KEY) en el archivo .env."
+            "Falta la clave del asistente. Configurá CHATBOT_API_KEY en el archivo .env "
+            "(o DEEPSEEK_API_KEY si usás DeepSeek)."
         )
 
     summary, catalog, included, truncated = build_catalog_context(records, message)
