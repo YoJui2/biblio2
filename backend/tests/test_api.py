@@ -134,9 +134,25 @@ def test_bulk_create_saves_several_records(client: TestClient) -> None:
     response = client.post("/api/books/bulk", json=payload)
 
     assert response.status_code == 201
-    assert response.json() == {"records": 3, "copies": 6}
+    assert response.json() == {"records": 3, "copies": 6, "skipped": 0}
     titles = [book["title"] for book in client.get("/api/books").json()]
     assert titles == ["Primero", "Segundo", "Tercero"]
+
+
+def test_bulk_create_skip_ignores_conflicting_records(client: TestClient) -> None:
+    assert client.post("/api/books", json=_payload(inventory_numbers=[80])).status_code == 201
+
+    payload = [
+        {**_payload(title="Choque", inventory_numbers=[80, 81], inventory_source="80-81")},
+        {**_payload(title="Nuevo", inventory_numbers=[90, 91], inventory_source="90-91")},
+    ]
+
+    response = client.post("/api/books/bulk?on_conflict=skip", json=payload)
+
+    assert response.status_code == 201
+    assert response.json() == {"records": 1, "copies": 2, "skipped": 1}
+    titles = [book["title"] for book in client.get("/api/books").json()]
+    assert titles == ["Registro de prueba", "Nuevo"]
 
 
 def test_bulk_create_rejects_duplicates_within_batch(client: TestClient) -> None:
@@ -178,7 +194,7 @@ def test_csv_import_is_atomic_and_expands_inventory_ranges(client: TestClient) -
     )
 
     assert response.status_code == 200
-    assert response.json() == {"records": 1, "copies": 10}
+    assert response.json() == {"records": 1, "copies": 10, "skipped": 0}
     imported = client.get("/api/books").json()
     assert imported[0]["inventory_numbers"] == list(range(62, 72))
 
@@ -201,6 +217,30 @@ def test_csv_import_is_atomic_and_expands_inventory_ranges(client: TestClient) -
     )
     assert rejected.status_code == 422
     assert client.get("/api/books").json() == imported
+
+
+def test_csv_import_merge_ignores_existing_duplicates(client: TestClient) -> None:
+    header = "N° Inv.,Autor,Título,Pie de Imprenta,Encuadernación / Observaciones\n"
+    first = header + "62-63,Autor,Título A,Editorial,Cartoné\n"
+    assert client.post(
+        "/api/import?mode=replace",
+        files={"file": ("base.csv", first.encode("utf-8"), "text/csv")},
+    ).status_code == 200
+
+    second = (
+        header
+        + "62,Autor,Duplicado,Editorial,Cartoné\n"
+        + "90-91,Autor,Título Nuevo,Editorial,Cartoné\n"
+    )
+    response = client.post(
+        "/api/import?mode=merge",
+        files={"file": ("nuevo.csv", second.encode("utf-8"), "text/csv")},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"records": 1, "copies": 2, "skipped": 1}
+    titles = sorted(book["title"] for book in client.get("/api/books").json())
+    assert titles == ["Título A", "Título Nuevo"]
 
 
 def test_alembic_initial_migration_creates_catalog_tables(tmp_path, monkeypatch) -> None:

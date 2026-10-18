@@ -30,7 +30,7 @@ MySQL solo es accesible desde la red interna de Docker; no se publica un puerto 
 | `GET` | `/api/health` | Comprueba la conexión a MySQL. |
 | `GET` | `/api/books` | Lista los registros y sus números de inventario individuales. |
 | `POST` | `/api/books` | Crea un registro y sus ejemplares. |
-| `POST` | `/api/books/bulk` | Crea varios registros a la vez de forma atómica (un escaneo con varias fichas). |
+| `POST` | `/api/books/bulk` | Crea varios registros a la vez de forma atómica (un escaneo con varias fichas). Con `?on_conflict=skip` omite los registros cuyos números ya existen y devuelve `skipped` en lugar de rechazar todo el lote. |
 | `PUT` | `/api/books/{id}` | Actualiza un registro y su rango de ejemplares. |
 | `DELETE` | `/api/books/{id}` | Mueve el registro y sus ejemplares a la papelera. |
 | `DELETE` | `/api/books` | Mueve **todos** los registros a la papelera. |
@@ -38,7 +38,8 @@ MySQL solo es accesible desde la red interna de Docker; no se publica un puerto 
 | `POST` | `/api/trash/{id}/restore` | Restaura un registro al catálogo. |
 | `DELETE` | `/api/trash/{id}` | Borra definitivamente un registro de la papelera. |
 | `DELETE` | `/api/trash` | Vacía la papelera (borrado definitivo). |
-| `POST` | `/api/import?mode=replace` | Valida y reemplaza el catálogo a partir de un CSV; requiere confirmación si la base ya tiene registros. |
+| `POST` | `/api/import?mode=replace` | Valida y **reemplaza** el catálogo desde un CSV; requiere confirmación (`confirm_replace`) si la base ya tiene registros. |
+| `POST` | `/api/import?mode=merge` | Valida y **agrega** desde un CSV solo los registros nuevos, ignorando los números de inventario que ya existen. |
 | `GET` | `/api/ocr/status` | Informa el motor OCR activo (DeepSeek o TrOCR), si está disponible y qué formatos admite. |
 | `POST` | `/api/ocr/scan` | Lee una imagen escaneada y devuelve una o más propuestas de registro; no persiste nada. |
 | `GET` | `/api/chat/status` | Informa el modelo de chat activo y si hay una API key configurada. |
@@ -142,10 +143,15 @@ Al exportar, el panel escribe los rangos con prefijos normalizados, por ejemplo 
 ## Importación y reemplazos
 
 1. Elegí **Importar CSV** y seleccioná el archivo.
-2. FastAPI busca la fila de encabezados y valida los registros y sus números.
-3. Si el CSV es válido y ya hay datos cargados, la interfaz solicita confirmación: **confirmar reemplaza todo el catálogo de MySQL**; cancelar no lo modifica.
-4. Si la validación falla, MySQL conserva el catálogo actual. La sustitución se ejecuta en una transacción; cualquier error al guardarla revierte el reemplazo completo.
-5. La API exige un campo explícito de confirmación si MySQL ya tiene registros. Así, un navegador sin datos locales no puede sobrescribir silenciosamente un catálogo existente.
+2. Aparece un cuadro **en pantalla** (no el diálogo del navegador) para elegir qué hacer:
+   - **Reemplazar todo** (`mode=replace`): borra el catálogo actual e importa el CSV completo.
+   - **Ignorar duplicados** (`mode=merge`): conserva lo existente y agrega solo los registros cuyos números de inventario **no** están ya en el catálogo; las filas con números repetidos se omiten y se informa cuántas.
+   - **Cancelar**: no cambia nada.
+3. FastAPI busca la fila de encabezados y valida los registros y sus números.
+4. Si la validación falla, MySQL conserva el catálogo actual. La carga se ejecuta en una transacción; cualquier error revierte todo.
+5. En `replace`, la API exige un campo explícito de confirmación si MySQL ya tiene registros; en `merge` no hace falta porque nunca borra datos.
+
+Las confirmaciones de acciones destructivas (eliminar, vaciar catálogo o papelera) también usan un cuadro **en pantalla**, no el `confirm` nativo del navegador.
 
 Agregar y editar valida los campos obligatorios y evita asignar números ya utilizados por otro registro **activo** (los que están en la papelera no cuentan). Al editar un rango, los números anteriores de ese registro se sustituyen por los nuevos; confirmá que el rango sea el correcto antes de guardar. Eliminar un registro lo mueve a la papelera (ver abajo); el borrado definitivo elimina en cascada sus ejemplares.
 
@@ -176,6 +182,13 @@ docker compose up --build
 
 **No uses `down -v` si querés conservar datos**: elimina el volumen `mysql_data` completo.
 
+## Actividad reciente
+
+Debajo del perfil del bibliotecario, al pie de la barra lateral, el panel muestra un **registro de actividad** con los últimos movimientos (agregar, editar, importar CSV, escanear OCR, mover a la papelera, restaurar, borrar definitivo, etc.). Cada línea trae un punto de color según el tipo de evento —verde (ok), ámbar (advertencia), rojo (error) o azul (información)—, el texto formateado y la hora.
+
+- Se guarda en el navegador (`localStorage`, clave `biblioteca-actividad`) y conserva hasta 60 entradas; el botón **Limpiar** vacía la lista.
+- Es solo informativo y local: no reemplaza un registro de auditoría en MySQL ni incluye usuario, fila de origen ni descarga de informe (ver **próximos pasos**).
+
 ## Escenarios y manejo actual
 
 | Escenario | Comportamiento actual | Qué revisar |
@@ -189,13 +202,14 @@ docker compose up --build
 | Se confirma una importación mientras ya hay registros cargados | Se reemplaza el catálogo completo de MySQL en una transacción; no se mezclan filas ni se hace una actualización por título. | Exportá una copia antes si necesitás conservar el estado anterior. |
 | Se cancela la confirmación | No se cambia el catálogo. | No hace falta restaurar datos. |
 | Se edita el rango de un registro | Se reemplaza su conjunto de números; la validación impide conflictos con otros registros. | Una edición incorrecta podría liberar números que estaban asignados a ese registro. |
-| La imagen escaneada contiene varias fichas (multiregistro) | El OCR devuelve una propuesta por fila y el panel abre **Registros detectados**; al confirmar se guardan juntas con `POST /api/books/bulk` (transacción atómica). | Corregí cada fila; si hay números repetidos entre filas o ya asignados, se rechaza todo el lote. |
+| La imagen escaneada contiene varias fichas (multiregistro) | El OCR devuelve una propuesta por fila y el panel abre **Registros detectados**; al confirmar se guardan juntas con `POST /api/books/bulk`. | Corregí cada fila; si hay números repetidos **entre filas**, se rechaza el lote. |
+| Una o más filas del escaneo usan números ya asignados en el catálogo | Las filas en conflicto se **resaltan** y el panel pregunta qué hacer: **Omitir duplicados y guardar** (`on_conflict=skip`, guarda solo las filas nuevas e informa cuántas se omitieron) o **Cancelar y corregir**. | Corregí los números y volvé a guardar, o elegí omitir si querés cargar solo lo nuevo. |
 | Se escanea una imagen con un formato distinto al esperado | Si no hay filas con separadores `\|`, el intérprete cae al modo de un solo registro. | Revisá la propuesta; si vino mal, cargá los campos a mano o mejorá la toma. |
 | Se elimina un registro | Se mueve a la papelera; deja de contar en el catálogo. | Se puede restaurar o borrar definitivamente desde **Papelera**. |
 | Se exporta con búsqueda o filtro activo | Solo se exportan las filas visibles. | Quitá filtros para obtener el inventario completo. |
 | Se abre el panel en otro navegador o dispositivo | La colección aparece desde MySQL mientras se pueda conectar a la PC/servidor que aloja la API. | La base de esta configuración solo publica los puertos en `127.0.0.1`; no es accesible desde otros dispositivos de la red. |
 | Se editan datos desde dos pestañas abiertas | Cada operación se valida contra MySQL; los números repetidos se rechazan. No hay versionado de registros, así que dos ediciones simultáneas del mismo registro pueden pisarse. | Es una configuración de desarrollo para una sola persona, no de operación concurrente. |
-| El navegador borra los datos del sitio | El catálogo no se borra porque está en MySQL; solo se pierde la preferencia de tema. | Conservá backups de MySQL/exportaciones CSV para proteger la colección. |
+| El navegador borra los datos del sitio | El catálogo no se borra porque está en MySQL; solo se pierden la preferencia de tema y la **actividad reciente**. | Conservá backups de MySQL/exportaciones CSV para proteger la colección. |
 | MySQL o FastAPI no está disponible | El panel informa la falta de conexión y no puede leer ni guardar. | Verificá `docker compose ps` y `docker compose logs api db`. |
 | Se detienen los contenedores | Los datos se mantienen en el volumen `mysql_data`. | No uses `docker compose down -v` si querés conservarlos. |
 

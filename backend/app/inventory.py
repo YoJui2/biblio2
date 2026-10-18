@@ -30,7 +30,9 @@ def normalize_header(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", without_accents.lower())
 
 
-def parse_inventory_csv(text: str) -> list[dict[str, object]]:
+def parse_inventory_csv(
+    text: str, *, ignore_duplicates: bool = False
+) -> list[dict[str, object]]:
     import csv
     import io
 
@@ -92,6 +94,8 @@ def parse_inventory_csv(text: str) -> list[dict[str, object]]:
 
         duplicate = next((number for number in numbers if number in seen), None)
         if duplicate is not None:
+            if ignore_duplicates:
+                continue
             errors.append(
                 f"fila {row_index}: INV-{duplicate:06d} se repite "
                 f"(también en fila {seen[duplicate]})"

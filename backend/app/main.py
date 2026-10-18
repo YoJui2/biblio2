@@ -140,20 +140,36 @@ def create_app(
     def create_records_bulk(
         payload: list[RecordCreate],
         session: Annotated[Session, Depends(dependency)],
+        on_conflict: Annotated[str, Query(pattern="^(error|skip)$")] = "error",
     ):
         if not payload:
             raise HTTPException(
                 status_code=400, detail="No hay registros para guardar."
             )
+        skipped = 0
+        if on_conflict == "skip":
+            existing = _active_inventory_numbers(session)
+            pending: list[RecordCreate] = []
+            for item in payload:
+                if any(number in existing for number in item.inventory_numbers):
+                    skipped += 1
+                    continue
+                existing.update(item.inventory_numbers)
+                pending.append(item)
+            payload = pending
+        else:
+            numbers = [
+                number for item in payload for number in item.inventory_numbers
+            ]
+            if len(numbers) != len(set(numbers)):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Hay números de inventario repetidos entre los registros.",
+                )
+            validate_numbers_not_in_use(numbers, _active_inventory_numbers(session))
         numbers = [
             number for item in payload for number in item.inventory_numbers
         ]
-        if len(numbers) != len(set(numbers)):
-            raise HTTPException(
-                status_code=409,
-                detail="Hay números de inventario repetidos entre los registros.",
-            )
-        validate_numbers_not_in_use(numbers, _active_inventory_numbers(session))
         records = [
             BibliographicRecord(
                 section="",
@@ -178,7 +194,9 @@ def create_app(
                 status_code=409,
                 detail="Uno o más números de inventario ya están asignados.",
             ) from error
-        return BulkCreateResult(records=len(records), copies=len(numbers))
+        return BulkCreateResult(
+            records=len(records), copies=len(numbers), skipped=skipped
+        )
 
     @application.put(
         "/api/books/{record_id}",
@@ -377,9 +395,8 @@ def create_app(
         session: Annotated[Session, Depends(dependency)],
         file: Annotated[UploadFile, File()],
         confirm_replace: Annotated[bool, Form()] = False,
-        mode: Annotated[str, Query(pattern="^replace$")] = "replace",
+        mode: Annotated[str, Query(pattern="^(replace|merge)$")] = "replace",
     ):
-        del mode
         if not file.filename or Path(file.filename).suffix.lower() != ".csv":
             raise HTTPException(status_code=400, detail="Seleccioná un archivo .csv.")
         content = await file.read(10_000_001)
@@ -393,29 +410,42 @@ def create_app(
                 detail="El CSV debe estar guardado con codificación UTF-8.",
             ) from error
         try:
-            records = parse_inventory_csv(text)
+            records = parse_inventory_csv(text, ignore_duplicates=(mode == "merge"))
         except (ValueError, csv.Error) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
-        total_numbers = sum(len(record["inventory_numbers"]) for record in records)
+        pending: list[dict[str, object]] = []
+        skipped = 0
         try:
             with session.begin():
-                current_count = session.scalar(
-                    select(func.count())
-                    .select_from(BibliographicRecord)
-                    .where(BibliographicRecord.deleted_at.is_(None))
-                ) or 0
-                if current_count and not confirm_replace:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=(
-                            f"MySQL ya contiene {current_count} registros. "
-                            "Confirmá el reemplazo antes de volver a importar."
-                        ),
-                    )
-                session.execute(delete(InventoryCopy))
-                session.execute(delete(BibliographicRecord))
-                for item in records:
+                if mode == "replace":
+                    current_count = session.scalar(
+                        select(func.count())
+                        .select_from(BibliographicRecord)
+                        .where(BibliographicRecord.deleted_at.is_(None))
+                    ) or 0
+                    if current_count and not confirm_replace:
+                        raise HTTPException(
+                            status_code=409,
+                            detail=(
+                                f"MySQL ya contiene {current_count} registros. "
+                                "Confirmá el reemplazo antes de volver a importar."
+                            ),
+                        )
+                    session.execute(delete(InventoryCopy))
+                    session.execute(delete(BibliographicRecord))
+                    pending = records
+                else:
+                    existing = _active_inventory_numbers(session)
+                    for item in records:
+                        numbers = item["inventory_numbers"]
+                        assert isinstance(numbers, list)
+                        if any(number in existing for number in numbers):
+                            skipped += 1
+                            continue
+                        existing.update(numbers)
+                        pending.append(item)
+                for item in pending:
                     numbers = item["inventory_numbers"]
                     assert isinstance(numbers, list)
                     record = BibliographicRecord(
@@ -435,12 +465,10 @@ def create_app(
             session.rollback()
             raise HTTPException(
                 status_code=409,
-                detail="No se pudo reemplazar el catálogo por un conflicto de inventario.",
+                detail="No se pudo importar el catálogo por un conflicto de inventario.",
             ) from error
-        return ImportResult(
-            records=len(records),
-            copies=total_numbers,
-        )
+        copies = sum(len(item["inventory_numbers"]) for item in pending)
+        return ImportResult(records=len(pending), copies=copies, skipped=skipped)
 
     @application.get("/api/ocr/status", response_model=OCRStatus, tags=["ocr"])
     def ocr_status() -> dict[str, object]:

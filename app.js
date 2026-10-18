@@ -40,6 +40,11 @@ const elements = {
   scanPreview: document.querySelector("#scan-preview"),
   scanImage: document.querySelector("#scan-image"),
   scanNote: document.querySelector("#scan-note"),
+  confirmDialog: document.querySelector("#confirm-dialog"),
+  confirmEyebrow: document.querySelector("#confirm-eyebrow"),
+  confirmTitle: document.querySelector("#confirm-title"),
+  confirmMessage: document.querySelector("#confirm-message"),
+  confirmActions: document.querySelector("#confirm-actions"),
   inventoryView: document.querySelector("#inventory-view"),
   chatPanel: document.querySelector("#chatbot"),
   chatLog: document.querySelector("#chat-log"),
@@ -51,6 +56,8 @@ const elements = {
   chatModelPill: document.querySelector("#chat-model-pill"),
   chatSuggestions: document.querySelector("#chat-suggestions"),
   breadcrumbCurrent: document.querySelector("#breadcrumb-current"),
+  activityList: document.querySelector("#activity-list"),
+  activityClear: document.querySelector("#activity-clear"),
 };
 
 let books = [];
@@ -63,6 +70,9 @@ let scanRecords = [];
 let chatHistory = [];
 let chatBusy = false;
 let chatStarted = false;
+let activityEntries = [];
+const ACTIVITY_KEY = "biblioteca-actividad";
+const ACTIVITY_LIMIT = 60;
 
 const CHAT_WELCOME = "Hola, soy el asistente de la biblioteca. Preguntame por un libro (título, autor o un número como INV-000062) o por el funcionamiento de la biblioteca: préstamos, cómo asociarte, horarios y computadoras. Si no está en el catálogo o no lo sé, te lo digo.";
 
@@ -360,6 +370,109 @@ function showToast(message) {
   toastTimeout = setTimeout(() => elements.toast.classList.remove("visible"), 3500);
 }
 
+function loadActivity() {
+  try {
+    const raw = localStorage.getItem(ACTIVITY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    activityEntries = Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    activityEntries = [];
+  }
+}
+
+function saveActivity() {
+  try {
+    localStorage.setItem(ACTIVITY_KEY, JSON.stringify(activityEntries));
+  } catch (error) {
+    console.error("No se pudo guardar la actividad reciente.", error);
+  }
+}
+
+function activityTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const sameDay = date.toDateString() === new Date().toDateString();
+  return new Intl.DateTimeFormat(
+    "es-AR",
+    sameDay
+      ? { hour: "2-digit", minute: "2-digit" }
+      : { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" },
+  ).format(date);
+}
+
+function renderActivity() {
+  if (!elements.activityList) return;
+  if (!activityEntries.length) {
+    elements.activityList.innerHTML = '<li class="activity-empty">Sin movimientos todavía.</li>';
+    return;
+  }
+  elements.activityList.innerHTML = activityEntries.map((entry) => {
+    const kind = ["ok", "warn", "error", "info"].includes(entry.kind) ? entry.kind : "info";
+    return `<li class="activity-item ${kind}"><span class="activity-dot" aria-hidden="true"></span><span class="activity-body"><span class="activity-text">${escapeHTML(entry.message)}</span><span class="activity-time">${escapeHTML(activityTime(entry.at))}</span></span></li>`;
+  }).join("");
+}
+
+function logActivity(message, kind = "info") {
+  activityEntries.unshift({ at: new Date().toISOString(), kind, message: String(message) });
+  if (activityEntries.length > ACTIVITY_LIMIT) activityEntries.length = ACTIVITY_LIMIT;
+  saveActivity();
+  renderActivity();
+}
+
+function clearActivity() {
+  activityEntries = [];
+  saveActivity();
+  renderActivity();
+}
+
+function openChoiceDialog({ title, message, eyebrow = "CONFIRMACIÓN", options }) {
+  const dialog = elements.confirmDialog;
+  if (!dialog) return Promise.resolve(null);
+  elements.confirmEyebrow.textContent = eyebrow;
+  elements.confirmTitle.textContent = title;
+  elements.confirmMessage.textContent = message;
+  elements.confirmActions.innerHTML = "";
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      if (dialog.open) dialog.close();
+      resolve(value);
+    };
+    options.forEach((option) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `button ${option.className || "button-cancel"}`;
+      button.textContent = option.label;
+      button.addEventListener("click", () => finish(option.value));
+      elements.confirmActions.append(button);
+    });
+    dialog.addEventListener("close", () => finish(null), { once: true });
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      finish(null);
+    }, { once: true });
+    dialog.showModal();
+  });
+}
+
+function confirmAction(message, config = {}) {
+  return openChoiceDialog({
+    title: config.title || "Confirmar acción",
+    message,
+    eyebrow: config.eyebrow,
+    options: [
+      { value: false, label: config.cancelLabel || "Cancelar", className: "button-cancel" },
+      {
+        value: true,
+        label: config.confirmLabel || "Confirmar",
+        className: config.tone === "danger" ? "button-danger" : "button-primary",
+      },
+    ],
+  }).then((value) => value === true);
+}
+
 function resetOcrPreview() {
   if (ocrImageUrl) {
     URL.revokeObjectURL(ocrImageUrl);
@@ -562,13 +675,38 @@ async function saveScanRecords() {
     seen.add(number);
   }));
   if (duplicates.size) {
-    elements.scanError.textContent = `Números de inventario repetidos entre las filas: ${[...duplicates].join(", ")}.`;
+    const formatted = [...duplicates].map(formatInventoryNumber).join(", ");
+    elements.scanError.textContent = `Números de inventario repetidos entre las filas: ${formatted}.`;
     elements.scanError.hidden = false;
     return;
   }
+  const catalogNumbers = new Set(books.flatMap((book) => book.inventoryNumbers));
+  const conflictingRows = [];
+  payload.forEach((item, index) => {
+    if (item.inventory_numbers.some((number) => catalogNumbers.has(number))) {
+      conflictingRows.push(index);
+    }
+  });
+  rows.forEach((row) => row.classList.remove("scan-row-conflict"));
+  if (conflictingRows.length) {
+    conflictingRows.forEach((index) => rows[index].classList.add("scan-row-conflict"));
+    const repeated = [...new Set(conflictingRows.flatMap(
+      (index) => payload[index].inventory_numbers.filter((number) => catalogNumbers.has(number)),
+    ))].map(formatInventoryNumber).join(", ");
+    const choice = await openChoiceDialog({
+      title: "Números ya asignados",
+      eyebrow: "DUPLICADOS",
+      message: `${conflictingRows.length} fila(s) usan números que ya están en el catálogo (${repeated}). Elegí «Omitir duplicados» para guardar solo las filas nuevas o «Cancelar» para corregirlas.`,
+      options: [
+        { value: null, label: "Cancelar y corregir", className: "button-cancel" },
+        { value: "skip", label: "Omitir duplicados y guardar", className: "button-primary" },
+      ],
+    });
+    if (choice !== "skip") return;
+  }
   elements.scanSaveButton.disabled = true;
   try {
-    const result = await apiRequest("/api/books/bulk", {
+    const result = await apiRequest("/api/books/bulk?on_conflict=skip", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -576,10 +714,13 @@ async function saveScanRecords() {
     elements.scanDialog.close();
     const loaded = await refreshBooks();
     if (!loaded) return;
-    showToast(`Se guardaron ${result.records} registros y ${result.copies} números de inventario.`);
+    const skippedNote = result.skipped ? ` Se omitieron ${result.skipped} fila(s) por números repetidos.` : "";
+    showToast(`Se guardaron ${result.records} registros y ${result.copies} números de inventario.${skippedNote}`);
+    logActivity(`Escaneo guardado: ${result.records} registro(s) y ${result.copies} número(s)${result.skipped ? `, ${result.skipped} duplicado(s) omitidos` : ""}.`, result.skipped ? "warn" : "ok");
   } catch (error) {
     elements.scanError.textContent = error.message;
     elements.scanError.hidden = false;
+    logActivity(`No se pudo guardar el escaneo: ${error.message}`, "error");
   } finally {
     elements.scanSaveButton.disabled = false;
   }
@@ -635,9 +776,11 @@ async function handleSubmit(event) {
     const loaded = await refreshBooks();
     if (!loaded) return;
     showToast(editingId ? "Se guardaron los cambios del registro." : "El registro se agregó al catálogo.");
+    logActivity(editingId ? `Registro actualizado: «${title}».` : `Registro agregado: «${title}».`, "ok");
   } catch (error) {
     elements.formError.textContent = error.message;
     elements.formError.hidden = false;
+    logActivity(`No se pudo guardar el registro «${title}»: ${error.message}`, "error");
   } finally {
     elements.saveButton.disabled = false;
   }
@@ -646,15 +789,21 @@ async function handleSubmit(event) {
 async function deleteBook(id) {
   const book = books.find((item) => item.id === id);
   if (!book) return;
-  if (!window.confirm(`¿Mover "${book.title}" y sus ${book.inventoryNumbers.length} números a la papelera?`)) return;
+  const confirmed = await confirmAction(
+    `¿Mover «${book.title}» y sus ${book.inventoryNumbers.length} número(s) de inventario a la papelera?`,
+    { title: "Mover a la papelera", eyebrow: "ELIMINAR", confirmLabel: "Mover a papelera", tone: "danger" },
+  );
+  if (!confirmed) return;
   try {
     await apiRequest(`/api/books/${encodeURIComponent(id)}`, { method: "DELETE" });
     const loaded = await refreshBooks();
     if (!loaded) return;
     await refreshTrashCount();
     showToast("El registro se movió a la papelera.");
+    logActivity(`Registro movido a la papelera: «${book.title}».`, "warn");
   } catch (error) {
     showToast(`No se pudo eliminar el registro: ${error.message}`);
+    logActivity(`No se pudo enviar a la papelera «${book.title}»: ${error.message}`, "error");
   }
 }
 
@@ -664,8 +813,16 @@ async function clearCatalog() {
     return;
   }
   const copies = books.reduce((total, book) => total + book.inventoryNumbers.length, 0);
-  if (!window.confirm(`¿Mover los ${books.length} registros y sus ${copies} números de inventario a la papelera?`)) return;
-  if (!window.confirm("Confirmá otra vez: se moverá todo el catálogo a la papelera. Podés restaurarlo desde ahí.")) return;
+  const first = await confirmAction(
+    `¿Mover los ${books.length} registros y sus ${copies} números de inventario a la papelera?`,
+    { title: "Vaciar catálogo", eyebrow: "VACIAR", confirmLabel: "Continuar", tone: "danger" },
+  );
+  if (!first) return;
+  const second = await confirmAction(
+    "Confirmá otra vez: se moverá todo el catálogo a la papelera. Podés restaurarlo desde ahí.",
+    { title: "¿Seguro?", eyebrow: "CONFIRMAR", confirmLabel: "Sí, vaciar", tone: "danger" },
+  );
+  if (!second) return;
   try {
     const result = await apiRequest("/api/books", { method: "DELETE" });
     elements.search.value = "";
@@ -673,8 +830,10 @@ async function clearCatalog() {
     if (!loaded) return;
     await refreshTrashCount();
     showToast(`Se movieron ${result.deleted_records} registros a la papelera.`);
+    logActivity(`Catálogo vaciado: ${result.deleted_records} registro(s) a la papelera.`, "warn");
   } catch (error) {
     showToast(`No se pudo vaciar el catálogo: ${error.message}`);
+    logActivity(`No se pudo vaciar el catálogo: ${error.message}`, "error");
   }
 }
 
@@ -752,69 +911,82 @@ async function restoreRecord(id) {
     const loaded = await refreshBooks();
     if (!loaded) return;
     showToast("El registro se restauró al catálogo.");
+    logActivity("Registro restaurado desde la papelera.", "ok");
   } catch (error) {
     showToast(`No se pudo restaurar: ${error.message}`);
+    logActivity(`No se pudo restaurar desde la papelera: ${error.message}`, "error");
   }
 }
 
 async function purgeRecord(id) {
   const record = trash.find((item) => item.id === id);
   if (!record) return;
-  if (!window.confirm(`¿Borrar definitivamente "${record.title}"? No se puede deshacer.`)) return;
+  const confirmed = await confirmAction(
+    `¿Borrar definitivamente «${record.title}»? No se puede deshacer.`,
+    { title: "Borrar definitivamente", eyebrow: "PAPELERA", confirmLabel: "Borrar", tone: "danger" },
+  );
+  if (!confirmed) return;
   try {
     await apiRequest(`/api/trash/${encodeURIComponent(id)}`, { method: "DELETE" });
     await refreshTrashCount();
     renderTrash();
     showToast("El registro se borró definitivamente.");
+    logActivity(`Registro borrado definitivamente: «${record.title}».`, "error");
   } catch (error) {
     showToast(`No se pudo borrar: ${error.message}`);
+    logActivity(`No se pudo borrar «${record.title}»: ${error.message}`, "error");
   }
 }
 
 async function emptyTrash() {
   if (!trash.length) return;
-  if (!window.confirm(`¿Vaciar la papelera? Se borrarán ${trash.length} registros definitivamente.`)) return;
+  const confirmed = await confirmAction(
+    `¿Vaciar la papelera? Se borrarán ${trash.length} registro(s) definitivamente.`,
+    { title: "Vaciar papelera", eyebrow: "PAPELERA", confirmLabel: "Borrar todo", tone: "danger" },
+  );
+  if (!confirmed) return;
   try {
     const result = await apiRequest("/api/trash", { method: "DELETE" });
     await refreshTrashCount();
     renderTrash();
     showToast(`Se borraron ${result.deleted_records} registros de la papelera.`);
+    logActivity(`Papelera vaciada: ${result.deleted_records} registro(s) eliminados.`, "error");
   } catch (error) {
     showToast(`No se pudo vaciar la papelera: ${error.message}`);
+    logActivity(`No se pudo vaciar la papelera: ${error.message}`, "error");
   }
 }
 
 async function handleCsvFile(file) {
-  let confirmed = false;
   try {
-    if (books.length) {
-      if (!window.confirm(`La importación reemplazará los ${books.length} registros actuales. ¿Continuar?`)) return;
-      confirmed = true;
-    }
-    const upload = async (confirmReplace) => {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("confirm_replace", String(confirmReplace));
-      return apiRequest("/api/import?mode=replace", {
-        method: "POST",
-        body: formData,
-      });
-    };
-    let result;
-    try {
-      result = await upload(confirmed);
-    } catch (error) {
-      if (error.status !== 409 || !error.message.startsWith("MySQL ya contiene ") || confirmed
-        || !window.confirm(`${error.message}\n\n¿Reemplazar el catálogo de MySQL?`)) throw error;
-      result = await upload(true);
-    }
+    const choice = await openChoiceDialog({
+      title: "Importar catálogo",
+      eyebrow: "IMPORTAR CSV",
+      message: books.length
+        ? `El catálogo actual tiene ${books.length} registro(s). ¿Querés reemplazarlo por el CSV o agregar solo los registros nuevos e ignorar los números de inventario que ya existen?`
+        : "Elegí cómo cargar el CSV: reemplazar el catálogo actual o agregar solo los registros nuevos e ignorar los números que ya existan.",
+      options: [
+        { value: null, label: "Cancelar", className: "button-cancel" },
+        { value: "merge", label: "Ignorar duplicados", className: "button-export" },
+        { value: "replace", label: "Reemplazar todo", className: "button-danger" },
+      ],
+    });
+    if (!choice) return;
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("confirm_replace", String(choice === "replace"));
+    const result = await apiRequest(`/api/import?mode=${choice}`, { method: "POST", body: formData });
     elements.search.value = "";
     const loaded = await refreshBooks();
     if (!loaded) return;
-    showToast(`Importados ${result.records} registros y ${result.copies} ejemplares numerados.`);
+    const ignored = result.skipped ? ` Se ignoraron ${result.skipped} registro(s) duplicado(s).` : "";
+    const action = choice === "replace" ? "Reemplazados" : "Agregados";
+    showToast(`${action} ${result.records} registro(s) y ${result.copies} ejemplar(es) numerado(s).${ignored}`);
+    logActivity(`CSV ${choice === "replace" ? "reemplazado" : "combinado"}: ${result.records} registro(s)${result.skipped ? `, ${result.skipped} duplicado(s) ignorados` : ""}.`, result.skipped ? "warn" : "ok");
   } catch (error) {
     console.error("No se pudo importar el CSV a MySQL.", error);
     showToast(`No se pudo importar el CSV: ${error.message}`);
+    logActivity(`No se pudo importar el CSV: ${error.message}`, "error");
   } finally {
     elements.csvInput.value = "";
   }
@@ -867,6 +1039,7 @@ function reportOcrError(error) {
   elements.formError.hidden = true;
   showOcrAlert(message, "error");
   showToast(message);
+  logActivity(`Error de OCR: ${message}`, "error");
 }
 
 async function getOcrStatus() {
@@ -898,6 +1071,8 @@ async function handleOcrFile(file) {
     formData.append("file", file);
     const result = await apiRequest("/api/ocr/scan", { method: "POST", body: formData });
     showOcrSuggestion(result, imageUrl);
+    const recognized = Array.isArray(result.records) ? result.records.length : 1;
+    logActivity(`Escaneo OCR: ${recognized} registro(s) reconocido(s).`, "info");
   } catch (error) {
     URL.revokeObjectURL(imageUrl);
     reportOcrError(error);
@@ -1165,6 +1340,10 @@ elements.chatSuggestions?.addEventListener("click", (event) => {
 document.querySelector("#today").textContent = new Intl.DateTimeFormat("es-AR", {
   weekday: "long", day: "numeric", month: "long", year: "numeric",
 }).format(new Date());
+
+loadActivity();
+renderActivity();
+elements.activityClear?.addEventListener("click", clearActivity);
 
 loadTheme();
 renderBooks();

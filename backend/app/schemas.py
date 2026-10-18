@@ -54,11 +54,13 @@ class RecordRead(BaseModel):
 class ImportResult(BaseModel):
     records: int
     copies: int
+    skipped: int = 0
 
 
 class BulkCreateResult(BaseModel):
     records: int
     copies: int
+    skipped: int = 0
 
 
 class DeleteAllResult(BaseModel):
