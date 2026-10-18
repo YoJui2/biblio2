@@ -454,15 +454,21 @@ function updateTrashCount() {
   elements.trashCount.hidden = trash.length === 0;
 }
 
-async function refreshTrashCount() {
-  try {
-    const records = await apiRequest("/api/trash");
-    trash = records.map(fromApiRecord);
-  } catch (error) {
-    trash = [];
-  }
+async function loadTrash() {
+  const records = await apiRequest("/api/trash");
+  trash = records.map(fromApiRecord);
   updateTrashCount();
   return trash;
+}
+
+async function refreshTrashCount() {
+  try {
+    return await loadTrash();
+  } catch (error) {
+    trash = [];
+    updateTrashCount();
+    return trash;
+  }
 }
 
 function renderTrash() {
@@ -498,10 +504,12 @@ async function openTrash() {
   elements.trashEmpty.hidden = true;
   elements.trashList.innerHTML = '<li class="trash-loading">Cargando papelera…</li>';
   try {
-    await refreshTrashCount();
+    await loadTrash();
     renderTrash();
   } catch (error) {
     elements.trashList.innerHTML = "";
+    elements.trashList.hidden = true;
+    elements.trashEmpty.hidden = true;
     showToast(`No se pudo abrir la papelera: ${error.message}`);
   }
 }
@@ -755,6 +763,13 @@ elements.list.addEventListener("click", (event) => {
   deleteButton.addEventListener("click", () => deleteBook(book.id));
   menu.append(editButton, deleteButton);
   toggle.parentElement.append(menu);
+  const wrap = toggle.closest(".table-wrap");
+  if (wrap) {
+    const rect = toggle.getBoundingClientRect();
+    if (rect.bottom > wrap.getBoundingClientRect().bottom - 130) {
+      menu.classList.add("row-menu-up");
+    }
+  }
   toggle.setAttribute("aria-expanded", "true");
 });
 
