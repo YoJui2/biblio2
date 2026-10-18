@@ -25,9 +25,15 @@ const elements = {
   ocrAlert: document.querySelector("#ocr-alert"),
   ocrAlertMessage: document.querySelector("#ocr-alert-message"),
   themeToggle: document.querySelector("#theme-toggle"),
+  trashDialog: document.querySelector("#trash-dialog"),
+  trashList: document.querySelector("#trash-list"),
+  trashEmpty: document.querySelector("#trash-empty"),
+  trashCount: document.querySelector("#trash-count"),
+  emptyTrashButton: document.querySelector("#empty-trash-button"),
 };
 
 let books = [];
+let trash = [];
 let editingId = null;
 let toastTimeout;
 let ocrImageUrl = null;
@@ -72,6 +78,7 @@ function fromApiRecord(record) {
     binding: record.binding,
     inventorySource: record.inventory_source,
     inventoryNumbers: record.inventory_numbers,
+    deletedAt: record.deleted_at,
   };
 }
 
@@ -408,12 +415,13 @@ async function handleSubmit(event) {
 async function deleteBook(id) {
   const book = books.find((item) => item.id === id);
   if (!book) return;
-  if (!window.confirm(`¿Querés eliminar "${book.title}" y sus ${book.inventoryNumbers.length} números de inventario? Esta acción no se puede deshacer.`)) return;
+  if (!window.confirm(`¿Mover "${book.title}" y sus ${book.inventoryNumbers.length} números a la papelera?`)) return;
   try {
     await apiRequest(`/api/books/${encodeURIComponent(id)}`, { method: "DELETE" });
     const loaded = await refreshBooks();
     if (!loaded) return;
-    showToast("El registro y sus números se eliminaron del inventario.");
+    await refreshTrashCount();
+    showToast("El registro se movió a la papelera.");
   } catch (error) {
     showToast(`No se pudo eliminar el registro: ${error.message}`);
   }
@@ -425,17 +433,116 @@ async function clearCatalog() {
     return;
   }
   const copies = books.reduce((total, book) => total + book.inventoryNumbers.length, 0);
-  if (!window.confirm(`¿Borrar los ${books.length} registros y sus ${copies} números de inventario? Esta acción no se puede deshacer.`)) return;
-  if (!window.confirm("Confirmá otra vez: se vaciará todo el catálogo guardado en MySQL.")) return;
+  if (!window.confirm(`¿Mover los ${books.length} registros y sus ${copies} números de inventario a la papelera?`)) return;
+  if (!window.confirm("Confirmá otra vez: se moverá todo el catálogo a la papelera. Podés restaurarlo desde ahí.")) return;
   try {
     const result = await apiRequest("/api/books", { method: "DELETE" });
     elements.search.value = "";
     elements.categoryFilter.value = "";
     const loaded = await refreshBooks();
     if (!loaded) return;
-    showToast(`Se borraron ${result.deleted_records} registros y ${result.deleted_copies} ejemplares.`);
+    await refreshTrashCount();
+    showToast(`Se movieron ${result.deleted_records} registros a la papelera.`);
   } catch (error) {
     showToast(`No se pudo vaciar el catálogo: ${error.message}`);
+  }
+}
+
+function updateTrashCount() {
+  if (!elements.trashCount) return;
+  elements.trashCount.textContent = trash.length.toLocaleString("es");
+  elements.trashCount.hidden = trash.length === 0;
+}
+
+async function refreshTrashCount() {
+  try {
+    const records = await apiRequest("/api/trash");
+    trash = records.map(fromApiRecord);
+  } catch (error) {
+    trash = [];
+  }
+  updateTrashCount();
+  return trash;
+}
+
+function renderTrash() {
+  const hasItems = trash.length > 0;
+  elements.trashEmpty.hidden = hasItems;
+  elements.trashList.hidden = !hasItems;
+  elements.emptyTrashButton.disabled = !hasItems;
+  updateTrashCount();
+  elements.trashList.innerHTML = trash.map((record) => {
+    const ids = inventoryText(record.inventoryNumbers);
+    let when = "";
+    if (record.deletedAt) {
+      const parsed = new Date(`${record.deletedAt}Z`);
+      when = Number.isNaN(parsed.getTime()) ? record.deletedAt : parsed.toLocaleString("es-AR");
+    }
+    return `<li class="trash-item" data-id="${escapeHTML(record.id)}">
+      <div class="trash-info">
+        <span class="trash-title" title="${escapeHTML(record.title)}">${escapeHTML(record.title)}</span>
+        <span class="trash-meta">${escapeHTML(record.author)} · ${escapeHTML(ids)}</span>
+        <span class="trash-when">Eliminado el ${escapeHTML(when)}</span>
+      </div>
+      <div class="trash-actions">
+        <button class="button button-export" type="button" data-action="restore">Restaurar</button>
+        <button class="button button-danger" type="button" data-action="purge">Borrar</button>
+      </div>
+    </li>`;
+  }).join("");
+}
+
+async function openTrash() {
+  elements.trashDialog.showModal();
+  elements.trashList.hidden = false;
+  elements.trashEmpty.hidden = true;
+  elements.trashList.innerHTML = '<li class="trash-loading">Cargando papelera…</li>';
+  try {
+    await refreshTrashCount();
+    renderTrash();
+  } catch (error) {
+    elements.trashList.innerHTML = "";
+    showToast(`No se pudo abrir la papelera: ${error.message}`);
+  }
+}
+
+async function restoreRecord(id) {
+  try {
+    await apiRequest(`/api/trash/${encodeURIComponent(id)}/restore`, { method: "POST" });
+    await refreshTrashCount();
+    renderTrash();
+    const loaded = await refreshBooks();
+    if (!loaded) return;
+    showToast("El registro se restauró al catálogo.");
+  } catch (error) {
+    showToast(`No se pudo restaurar: ${error.message}`);
+  }
+}
+
+async function purgeRecord(id) {
+  const record = trash.find((item) => item.id === id);
+  if (!record) return;
+  if (!window.confirm(`¿Borrar definitivamente "${record.title}"? No se puede deshacer.`)) return;
+  try {
+    await apiRequest(`/api/trash/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await refreshTrashCount();
+    renderTrash();
+    showToast("El registro se borró definitivamente.");
+  } catch (error) {
+    showToast(`No se pudo borrar: ${error.message}`);
+  }
+}
+
+async function emptyTrash() {
+  if (!trash.length) return;
+  if (!window.confirm(`¿Vaciar la papelera? Se borrarán ${trash.length} registros definitivamente.`)) return;
+  try {
+    const result = await apiRequest("/api/trash", { method: "DELETE" });
+    await refreshTrashCount();
+    renderTrash();
+    showToast(`Se borraron ${result.deleted_records} registros de la papelera.`);
+  } catch (error) {
+    showToast(`No se pudo vaciar la papelera: ${error.message}`);
   }
 }
 
@@ -593,7 +700,19 @@ elements.form.addEventListener("submit", handleSubmit);
 elements.search.addEventListener("input", renderBooks);
 elements.categoryFilter.addEventListener("change", renderBooks);
 document.querySelector("#export-button").addEventListener("click", exportCsv);
-document.querySelector("#clear-all-button").addEventListener("click", clearCatalog);
+document.querySelector("#clear-all-button")?.addEventListener("click", clearCatalog);
+document.querySelector("#trash-button")?.addEventListener("click", openTrash);
+document.querySelector(".close-trash")?.addEventListener("click", () => elements.trashDialog.close());
+document.querySelector("#close-trash-button")?.addEventListener("click", () => elements.trashDialog.close());
+elements.emptyTrashButton?.addEventListener("click", emptyTrash);
+elements.trashList?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  const id = button.closest(".trash-item")?.dataset.id;
+  if (!id) return;
+  if (button.dataset.action === "restore") restoreRecord(id);
+  if (button.dataset.action === "purge") purgeRecord(id);
+});
 document.querySelector("#import-button").addEventListener("click", () => elements.csvInput.click());
 elements.themeToggle.addEventListener("click", toggleTheme);
 elements.dialog.addEventListener("close", resetOcrPreview);
@@ -661,3 +780,4 @@ document.querySelector("#today").textContent = new Intl.DateTimeFormat("es-AR", 
 loadTheme();
 renderBooks();
 refreshBooks();
+refreshTrashCount();

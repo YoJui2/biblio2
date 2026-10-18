@@ -31,8 +31,12 @@ MySQL solo es accesible desde la red interna de Docker; no se publica un puerto 
 | `GET` | `/api/books` | Lista los registros y sus números de inventario individuales. |
 | `POST` | `/api/books` | Crea un registro y sus ejemplares. |
 | `PUT` | `/api/books/{id}` | Actualiza un registro y su rango de ejemplares. |
-| `DELETE` | `/api/books/{id}` | Elimina el registro y sus ejemplares asociados. |
-| `DELETE` | `/api/books` | Borra **todos** los registros y ejemplares (para pruebas). |
+| `DELETE` | `/api/books/{id}` | Mueve el registro y sus ejemplares a la papelera. |
+| `DELETE` | `/api/books` | Mueve **todos** los registros a la papelera. |
+| `GET` | `/api/trash` | Lista los registros de la papelera. |
+| `POST` | `/api/trash/{id}/restore` | Restaura un registro al catálogo. |
+| `DELETE` | `/api/trash/{id}` | Borra definitivamente un registro de la papelera. |
+| `DELETE` | `/api/trash` | Vacía la papelera (borrado definitivo). |
 | `POST` | `/api/import?mode=replace` | Valida y reemplaza el catálogo a partir de un CSV; requiere confirmación si la base ya tiene registros. |
 | `GET` | `/api/ocr/status` | Informa el motor OCR activo (DeepSeek o TrOCR), si está disponible y qué formatos admite. |
 | `POST` | `/api/ocr/scan` | Lee una imagen escaneada y devuelve una propuesta de campos; no persiste nada. |
@@ -110,17 +114,27 @@ Al exportar, el panel escribe los rangos con prefijos normalizados, por ejemplo 
 4. Si la validación falla, MySQL conserva el catálogo actual. La sustitución se ejecuta en una transacción; cualquier error al guardarla revierte el reemplazo completo.
 5. La API exige un campo explícito de confirmación si MySQL ya tiene registros. Así, un navegador sin datos locales no puede sobrescribir silenciosamente un catálogo existente.
 
-Agregar y editar valida los campos obligatorios y evita asignar números ya utilizados por otro registro. MySQL impone además una restricción única para los números de inventario. Al editar un rango, los números anteriores de ese registro se sustituyen por los nuevos; confirmá que el rango sea el correcto antes de guardar. Eliminar un registro elimina en cascada sus ejemplares.
+Agregar y editar valida los campos obligatorios y evita asignar números ya utilizados por otro registro **activo** (los que están en la papelera no cuentan). Al editar un rango, los números anteriores de ese registro se sustituyen por los nuevos; confirmá que el rango sea el correcto antes de guardar. Eliminar un registro lo mueve a la papelera (ver abajo); el borrado definitivo elimina en cascada sus ejemplares.
 
-## Vaciar el catálogo para pruebas
+## Papelera y borrado
 
-Al testear el panel suele hacer falta empezar de cero. Para eso está el botón **Vaciar catálogo** en la barra del panel (pide dos confirmaciones) y el endpoint `DELETE /api/books`, que borra todos los registros y sus ejemplares en una sola operación:
+Eliminar un registro (el menú de cada fila o el botón **Vaciar catálogo**) ya no lo borra de inmediato: lo **mueve a la papelera**. El botón **Papelera** de la barra del panel abre la lista de registros eliminados, donde podés **restaurarlos** al catálogo o **borrarlos definitivamente**. El botón **Vaciar papelera** purga todo lo que quedó allí.
+
+- Los registros de la papelera no aparecen en el catálogo ni cuentan para los totales.
+- Mientras un registro está en la papelera, sus números de inventario se pueden **reutilizar** en un registro nuevo.
+- Al **restaurar**, si alguno de sus números ya fue asignado a un registro activo, la API responde `409` y no restaura.
+- El **borrado definitivo** (purga individual o vaciar papelera) no se puede deshacer.
+
+### Vaciar el catálogo para pruebas
+
+Al testear el panel suele hacer falta empezar de cero. El botón **Vaciar catálogo** mueve todo a la papelera en una sola operación; después se puede restaurar o purgar desde la **Papelera**. Por API:
 
 ```powershell
-curl.exe -X DELETE http://localhost:8000/api/books
+curl.exe -X DELETE http://localhost:8000/api/books        # mover todo a la papelera
+curl.exe -X DELETE http://localhost:8000/api/trash        # borrar la papelera definitivamente
 ```
 
-La respuesta informa qué se borró, por ejemplo `{ "deleted_records": 195, "deleted_copies": 751 }`. Si preferís resetear también la estructura y el volumen de MySQL:
+La respuesta informa qué se movió, por ejemplo `{ "deleted_records": 195, "deleted_copies": 751 }`. Si preferís resetear también la estructura y el volumen de MySQL:
 
 ```powershell
 docker compose down -v
@@ -142,7 +156,7 @@ docker compose up --build
 | Se confirma una importación mientras ya hay registros cargados | Se reemplaza el catálogo completo de MySQL en una transacción; no se mezclan filas ni se hace una actualización por título. | Exportá una copia antes si necesitás conservar el estado anterior. |
 | Se cancela la confirmación | No se cambia el catálogo. | No hace falta restaurar datos. |
 | Se edita el rango de un registro | Se reemplaza su conjunto de números; la validación impide conflictos con otros registros. | Una edición incorrecta podría liberar números que estaban asignados a ese registro. |
-| Se elimina un registro | Se quitan el registro y todos sus números. | La acción se confirma, pero no hay papelera ni recuperación dentro de la interfaz. |
+| Se elimina un registro | Se mueve a la papelera; deja de contar en el catálogo. | Se puede restaurar o borrar definitivamente desde **Papelera**. |
 | Se exporta con búsqueda o filtro activo | Solo se exportan las filas visibles. | Quitá filtros para obtener el inventario completo. |
 | Se abre el panel en otro navegador o dispositivo | La colección aparece desde MySQL mientras se pueda conectar a la PC/servidor que aloja la API. | La base de esta configuración solo publica los puertos en `127.0.0.1`; no es accesible desde otros dispositivos de la red. |
 | Se editan datos desde dos pestañas abiertas | Cada operación se valida contra MySQL; los números repetidos se rechazan. No hay versionado de registros, así que dos ediciones simultáneas del mismo registro pueden pisarse. | Es una configuración de desarrollo para una sola persona, no de operación concurrente. |
@@ -161,7 +175,7 @@ El CSV agrupa varios números bajo un mismo registro bibliográfico. Esto modela
 
 ## Modelo de datos y próximos pasos
 
-1. **Modelo separado:** ya se separa `BibliographicRecord` de `InventoryCopy`. Un registro bibliográfico guarda sección, autor, título, pie de imprenta y observaciones generales; cada ejemplar guarda un único número único de inventario.
+1. **Modelo separado:** ya se separa `BibliographicRecord` de `InventoryCopy`. Un registro bibliográfico guarda sección, autor, título, pie de imprenta, observaciones generales y `deleted_at` (papelera); cada ejemplar guarda un número de inventario único entre los registros activos.
 2. **Importación no destructiva:** la primera API implementa reemplazo total explícito y atómico. Como mejora, ofrecer una vista previa con conteo de altas, cambios, bajas y conflictos antes de confirmar, además de actualización por número de inventario.
 3. **Conflictos de identidad:** usar el número de inventario como identificador único del ejemplar. No fusionar registros por título o autor automáticamente: esos campos pueden repetirse o variar en su escritura.
 4. **Trazabilidad:** guardar archivo, fecha, usuario, fila de origen, número original y resultado de cada importación; permitir descargar un informe de filas omitidas o conflictivas.

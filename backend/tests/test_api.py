@@ -78,6 +78,55 @@ def test_delete_all_records_clears_catalog(client: TestClient) -> None:
     assert empty.json() == {"deleted_records": 0, "deleted_copies": 0}
 
 
+def _payload(**overrides) -> dict:
+    base = {
+        "section": "Literatura",
+        "title": "Registro de prueba",
+        "author": "Autora de prueba",
+        "inventory_numbers": [80, 81],
+        "inventory_source": "80-81",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_trash_soft_deletes_restores_and_purges(client: TestClient) -> None:
+    created = client.post("/api/books", json=_payload()).json()
+
+    assert client.delete(f"/api/books/{created['id']}").status_code == 204
+    assert client.get("/api/books").json() == []
+    trash = client.get("/api/trash").json()
+    assert [item["id"] for item in trash] == [created["id"]]
+    assert trash[0]["deleted_at"] is not None
+
+    reuse = client.post("/api/books", json=_payload(title="Reuso"))
+    assert reuse.status_code == 201
+
+    conflict = client.post(f"/api/trash/{created['id']}/restore")
+    assert conflict.status_code == 409
+
+    assert client.delete(f"/api/books/{reuse.json()['id']}").status_code == 204
+    restored = client.post(f"/api/trash/{created['id']}/restore")
+    assert restored.status_code == 200
+    assert restored.json()["id"] == created["id"]
+    assert restored.json()["deleted_at"] is None
+    assert [item["id"] for item in client.get("/api/trash").json()] == [reuse.json()["id"]]
+
+    client.delete(f"/api/books/{created['id']}")
+    assert client.delete(f"/api/trash/{created['id']}").status_code == 204
+    assert [item["id"] for item in client.get("/api/trash").json()] == [reuse.json()["id"]]
+
+
+def test_empty_trash_removes_all_trashed_records(client: TestClient) -> None:
+    created = client.post("/api/books", json=_payload()).json()
+    assert client.delete(f"/api/books/{created['id']}").status_code == 204
+
+    response = client.delete("/api/trash")
+    assert response.status_code == 200
+    assert response.json() == {"deleted_records": 1, "deleted_copies": 2}
+    assert client.get("/api/trash").json() == []
+
+
 def test_csv_import_is_atomic_and_expands_inventory_ranges(client: TestClient) -> None:
     csv_text = (
         "Inventario de prueba\n"

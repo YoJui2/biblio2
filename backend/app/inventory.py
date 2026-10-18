@@ -129,6 +129,7 @@ def record_to_dict(record) -> dict[str, object]:
         "binding": record.binding or "",
         "inventory_source": record.inventory_source or "",
         "inventory_numbers": [copy.inventory_number for copy in record.copies],
+        "deleted_at": record.deleted_at,
     }
 
 

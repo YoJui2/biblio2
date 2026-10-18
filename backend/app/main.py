@@ -1,11 +1,12 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
 import csv
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -27,6 +28,23 @@ from app.schemas import (
     RecordRead,
     RecordUpdate,
 )
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _active_inventory_numbers(
+    session: Session, exclude_record_id: int | None = None
+) -> set[int]:
+    query = (
+        select(InventoryCopy.inventory_number)
+        .join(BibliographicRecord, InventoryCopy.record_id == BibliographicRecord.id)
+        .where(BibliographicRecord.deleted_at.is_(None))
+    )
+    if exclude_record_id is not None:
+        query = query.where(InventoryCopy.record_id != exclude_record_id)
+    return set(session.scalars(query).all())
 
 
 def create_app(
@@ -65,6 +83,7 @@ def create_app(
     def list_records(session: Annotated[Session, Depends(dependency)]):
         records = session.scalars(
             select(BibliographicRecord)
+            .where(BibliographicRecord.deleted_at.is_(None))
             .options(selectinload(BibliographicRecord.copies))
             .order_by(BibliographicRecord.id)
         ).all()
@@ -82,7 +101,7 @@ def create_app(
     ):
         validate_numbers_not_in_use(
             payload.inventory_numbers,
-            set(session.scalars(select(InventoryCopy.inventory_number)).all()),
+            _active_inventory_numbers(session),
         )
         record = BibliographicRecord(
             section=payload.section,
@@ -125,13 +144,7 @@ def create_app(
         )
         if record is None:
             raise HTTPException(status_code=404, detail="No se encontró el registro.")
-        in_use = set(
-            session.scalars(
-                select(InventoryCopy.inventory_number).where(
-                    InventoryCopy.record_id != record_id
-                )
-            ).all()
-        )
+        in_use = _active_inventory_numbers(session, exclude_record_id=record_id)
         validate_numbers_not_in_use(payload.inventory_numbers, in_use)
         record.section = payload.section
         record.title = payload.title
@@ -163,13 +176,33 @@ def create_app(
     def delete_all_records(
         session: Annotated[Session, Depends(dependency)],
     ):
-        copies = session.scalar(select(func.count()).select_from(InventoryCopy)) or 0
+        active = BibliographicRecord.deleted_at.is_(None)
         records = (
-            session.scalar(select(func.count()).select_from(BibliographicRecord)) or 0
+            session.scalar(
+                select(func.count())
+                .select_from(BibliographicRecord)
+                .where(active)
+            )
+            or 0
+        )
+        copies = (
+            session.scalar(
+                select(func.count())
+                .select_from(InventoryCopy)
+                .join(
+                    BibliographicRecord,
+                    InventoryCopy.record_id == BibliographicRecord.id,
+                )
+                .where(active)
+            )
+            or 0
         )
         if records:
-            session.execute(delete(InventoryCopy))
-            session.execute(delete(BibliographicRecord))
+            session.execute(
+                update(BibliographicRecord)
+                .where(active)
+                .values(deleted_at=_utcnow())
+            )
             session.commit()
         return DeleteAllResult(deleted_records=records, deleted_copies=copies)
 
@@ -183,10 +216,105 @@ def create_app(
         session: Annotated[Session, Depends(dependency)],
     ) -> None:
         record = session.get(BibliographicRecord, record_id)
-        if record is None:
+        if record is None or record.deleted_at is not None:
             raise HTTPException(status_code=404, detail="No se encontró el registro.")
+        record.deleted_at = _utcnow()
+        session.commit()
+
+    @application.get(
+        "/api/trash",
+        response_model=list[RecordRead],
+        tags=["papelera"],
+    )
+    def list_trash(session: Annotated[Session, Depends(dependency)]):
+        records = session.scalars(
+            select(BibliographicRecord)
+            .where(BibliographicRecord.deleted_at.is_not(None))
+            .options(selectinload(BibliographicRecord.copies))
+            .order_by(
+                BibliographicRecord.deleted_at.desc(),
+                BibliographicRecord.id.desc(),
+            )
+        ).all()
+        return [record_to_dict(record) for record in records]
+
+    @application.post(
+        "/api/trash/{record_id}/restore",
+        response_model=RecordRead,
+        tags=["papelera"],
+    )
+    def restore_record(
+        record_id: int,
+        session: Annotated[Session, Depends(dependency)],
+    ):
+        record = session.scalar(
+            select(BibliographicRecord)
+            .where(BibliographicRecord.id == record_id)
+            .options(selectinload(BibliographicRecord.copies))
+        )
+        if record is None or record.deleted_at is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No se encontró el registro en la papelera.",
+            )
+        validate_numbers_not_in_use(
+            [copy.inventory_number for copy in record.copies],
+            _active_inventory_numbers(session),
+        )
+        record.deleted_at = None
+        session.commit()
+        session.refresh(record)
+        return record_to_dict(record)
+
+    @application.delete(
+        "/api/trash/{record_id}",
+        status_code=204,
+        tags=["papelera"],
+    )
+    def purge_record(
+        record_id: int,
+        session: Annotated[Session, Depends(dependency)],
+    ) -> None:
+        record = session.get(BibliographicRecord, record_id)
+        if record is None or record.deleted_at is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No se encontró el registro en la papelera.",
+            )
         session.delete(record)
         session.commit()
+
+    @application.delete(
+        "/api/trash",
+        response_model=DeleteAllResult,
+        tags=["papelera"],
+    )
+    def empty_trash(
+        session: Annotated[Session, Depends(dependency)],
+    ):
+        trashed = BibliographicRecord.deleted_at.is_not(None)
+        trash_ids = select(BibliographicRecord.id).where(trashed)
+        records = (
+            session.scalar(
+                select(func.count()).select_from(BibliographicRecord).where(trashed)
+            )
+            or 0
+        )
+        copies = (
+            session.scalar(
+                select(func.count())
+                .select_from(InventoryCopy)
+                .where(InventoryCopy.record_id.in_(trash_ids))
+            )
+            or 0
+        )
+        if records:
+            session.execute(
+                delete(InventoryCopy).where(InventoryCopy.record_id.in_(trash_ids))
+            )
+            session.execute(delete(BibliographicRecord).where(trashed))
+            session.commit()
+        return DeleteAllResult(deleted_records=records, deleted_copies=copies)
 
     @application.post(
         "/api/import",
@@ -222,7 +350,9 @@ def create_app(
         try:
             with session.begin():
                 current_count = session.scalar(
-                    select(func.count()).select_from(BibliographicRecord)
+                    select(func.count())
+                    .select_from(BibliographicRecord)
+                    .where(BibliographicRecord.deleted_at.is_(None))
                 ) or 0
                 if current_count and not confirm_replace:
                     raise HTTPException(
@@ -322,17 +452,25 @@ def create_app(
 
     @application.get("/", include_in_schema=False)
     def index():
-        return FileResponse(ui_directory / "index.html")
+        return FileResponse(
+            ui_directory / "index.html",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @application.get("/styles.css", include_in_schema=False)
     def styles():
-        return FileResponse(ui_directory / "styles.css", media_type="text/css")
+        return FileResponse(
+            ui_directory / "styles.css",
+            media_type="text/css",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @application.get("/app.js", include_in_schema=False)
     def script():
         return FileResponse(
             ui_directory / "app.js",
             media_type="text/javascript; charset=utf-8",
+            headers={"Cache-Control": "no-store"},
         )
 
     return application

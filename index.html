@@ -127,9 +127,13 @@
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v11m0 0 4-4m-4 4-4-4M5 16.5v4h14v-4"/></svg>
                   Exportar CSV
                 </button>
-                <button class="button button-danger" id="clear-all-button" type="button" title="Borra todos los registros del catálogo">
+                <button class="button button-danger" id="clear-all-button" type="button" title="Mueve todos los registros a la papelera">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m2 0v11.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 7 18.5V7m3 3v6m4-6v6"/></svg>
                   Vaciar catálogo
+                </button>
+                <button class="button button-export" id="trash-button" type="button" title="Registros eliminados">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14l-1 11.5A1.5 1.5 0 0 1 16.5 21h-9A1.5 1.5 0 0 1 6 19.5L5 8Zm4 0V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V8m-6 4v5m3-5v5"/></svg>
+                  Papelera<span class="trash-count" id="trash-count" hidden>0</span>
                 </button>
               </div>
             </div>
@@ -202,6 +206,25 @@
         <p class="form-error" id="form-error" role="alert" hidden></p>
         <div class="dialog-actions"><button class="button button-cancel" type="button" id="cancel-button">Cancelar</button><button class="button button-primary" type="submit" id="save-button">Agregar registro</button></div>
       </form>
+    </dialog>
+
+    <dialog class="book-dialog trash-dialog" id="trash-dialog" aria-labelledby="trash-title">
+      <div class="trash-body">
+        <div class="dialog-header">
+          <div><p class="eyebrow"><span class="eyebrow-line"></span> PAPELERA</p><h2 id="trash-title">Registros eliminados</h2><p class="dialog-description">Restaurá un registro al catálogo o borralo definitivamente.</p></div>
+          <button class="icon-button close-trash" type="button" aria-label="Cerrar">×</button>
+        </div>
+        <ul class="trash-list" id="trash-list"></ul>
+        <div class="empty-state trash-empty" id="trash-empty" hidden>
+          <span class="empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 8h14l-1 11.5A1.5 1.5 0 0 1 16.5 21h-9A1.5 1.5 0 0 1 6 19.5L5 8Zm4 0V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V8"/></svg></span>
+          <strong>La papelera está vacía</strong>
+          <p>Los registros que elimines van a aparecer acá.</p>
+        </div>
+        <div class="dialog-actions">
+          <button class="button button-danger" id="empty-trash-button" type="button">Vaciar papelera</button>
+          <button class="button button-cancel" id="close-trash-button" type="button">Cerrar</button>
+        </div>
+      </div>
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>

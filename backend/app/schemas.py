@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -45,6 +47,7 @@ class RecordRead(BaseModel):
     binding: str
     inventory_source: str
     inventory_numbers: list[int]
+    deleted_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
