@@ -184,7 +184,7 @@ docker compose up --build
 
 ## Actividad reciente
 
-Debajo del perfil del bibliotecario, al pie de la barra lateral, el panel muestra un **registro de actividad** con los últimos movimientos (agregar, editar, importar CSV, escanear OCR, mover a la papelera, restaurar, borrar definitivo, etc.). Cada línea trae un punto de color según el tipo de evento —verde (ok), ámbar (advertencia), rojo (error) o azul (información)—, el texto formateado y la hora.
+Debajo del perfil del bibliotecario, al pie de la barra lateral, el botón **Actividad reciente** abre un **popup** con los últimos movimientos (agregar, editar, importar CSV, escanear OCR, mover a la papelera, restaurar, borrar definitivo, etc.). Cada línea trae un punto de color según el tipo de evento —verde (ok), ámbar (advertencia), rojo (error) o azul (información)—, el texto formateado y la hora.
 
 - Se guarda en el navegador (`localStorage`, clave `biblioteca-actividad`) y conserva hasta 60 entradas; el botón **Limpiar** vacía la lista.
 - Es solo informativo y local: no reemplaza un registro de auditoría en MySQL ni incluye usuario, fila de origen ni descarga de informe (ver **próximos pasos**).

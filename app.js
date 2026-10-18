@@ -58,6 +58,9 @@ const elements = {
   breadcrumbCurrent: document.querySelector("#breadcrumb-current"),
   activityList: document.querySelector("#activity-list"),
   activityClear: document.querySelector("#activity-clear"),
+  activityButton: document.querySelector("#activity-button"),
+  activityDialog: document.querySelector("#activity-dialog"),
+  activityCount: document.querySelector("#activity-count"),
 };
 
 let books = [];
@@ -401,6 +404,10 @@ function activityTime(value) {
 }
 
 function renderActivity() {
+  if (elements.activityCount) {
+    elements.activityCount.textContent = activityEntries.length.toLocaleString("es");
+    elements.activityCount.hidden = activityEntries.length === 0;
+  }
   if (!elements.activityList) return;
   if (!activityEntries.length) {
     elements.activityList.innerHTML = '<li class="activity-empty">Sin movimientos todavía.</li>';
@@ -1344,6 +1351,12 @@ document.querySelector("#today").textContent = new Intl.DateTimeFormat("es-AR", 
 loadActivity();
 renderActivity();
 elements.activityClear?.addEventListener("click", clearActivity);
+elements.activityButton?.addEventListener("click", () => {
+  renderActivity();
+  elements.activityDialog?.showModal();
+});
+document.querySelector(".close-activity")?.addEventListener("click", () => elements.activityDialog?.close());
+document.querySelector("#close-activity-button")?.addEventListener("click", () => elements.activityDialog?.close());
 
 loadTheme();
 renderBooks();

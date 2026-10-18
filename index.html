@@ -11,8 +11,8 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=10" />
-    <script src="app.js?v=10" defer></script>
+    <link rel="stylesheet" href="styles.css?v=11" />
+    <script src="app.js?v=11" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -56,15 +56,11 @@
             <div class="profile-info"><strong>Bibliotecario</strong><span>Administrador</span></div>
             <span class="profile-dots" aria-hidden="true">···</span>
           </div>
-          <div class="activity" aria-label="Actividad reciente">
-            <div class="activity-head">
-              <span class="activity-title">Actividad</span>
-              <button class="activity-clear" id="activity-clear" type="button" title="Limpiar la actividad">Limpiar</button>
-            </div>
-            <ul class="activity-list" id="activity-list">
-              <li class="activity-empty">Sin movimientos todavía.</li>
-            </ul>
-          </div>
+          <button class="activity-trigger" id="activity-button" type="button" aria-haspopup="dialog">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v4.3l2.8 1.9"/><circle cx="12" cy="12" r="8.5"/></svg>
+            <span>Actividad reciente</span>
+            <span class="activity-trigger-count" id="activity-count" hidden>0</span>
+          </button>
         </div>
       </aside>
 
@@ -293,6 +289,25 @@
           </div>
         </div>
         <div class="dialog-actions" id="confirm-actions"></div>
+      </div>
+    </dialog>
+    <dialog class="book-dialog activity-dialog" id="activity-dialog" aria-labelledby="activity-title">
+      <div class="activity-wrap">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow"><span class="eyebrow-line"></span> REGISTRO</p>
+            <h2 id="activity-title">Actividad reciente</h2>
+            <p class="dialog-description">Movimientos recientes del panel. Se guardan en este navegador.</p>
+          </div>
+          <button class="icon-button close-activity" type="button" aria-label="Cerrar">×</button>
+        </div>
+        <ul class="activity-list" id="activity-list">
+          <li class="activity-empty">Sin movimientos todavía.</li>
+        </ul>
+        <div class="dialog-actions">
+          <button class="button button-danger" id="activity-clear" type="button">Limpiar</button>
+          <button class="button button-cancel" id="close-activity-button" type="button">Cerrar</button>
+        </div>
       </div>
     </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
