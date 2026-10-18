@@ -171,6 +171,81 @@ function escapeHTML(value) {
   })[character]);
 }
 
+function renderInline(text) {
+  return text
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+}
+
+function splitTableRow(line) {
+  return line.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim());
+}
+
+function renderMarkdownTable(header, rows) {
+  const head = header.map((cell) => `<th>${renderInline(cell)}</th>`).join("");
+  const body = rows
+    .map((row) => `<tr>${row.map((cell) => `<td>${renderInline(cell)}</td>`).join("")}</tr>`)
+    .join("");
+  return `<div class="chat-table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function renderMarkdown(text) {
+  const lines = escapeHTML(String(text ?? "")).replace(/\r\n?/g, "\n").split("\n");
+  const isTableRow = (line) => /^\s*\|.*\|\s*$/.test(line);
+  const isTableSeparator = (line) => /-/.test(line) && /^[\s|:-]+$/.test(line);
+  const isBullet = (line) => /^\s*[-*]\s+\S/.test(line);
+  const isOrdered = (line) => /^\s*\d+[.)]\s+\S/.test(line);
+  const html = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) {
+      i += 1;
+      continue;
+    }
+    if (isTableRow(line) && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+      const header = splitTableRow(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && isTableRow(lines[i])) {
+        rows.push(splitTableRow(lines[i]));
+        i += 1;
+      }
+      html.push(renderMarkdownTable(header, rows));
+      continue;
+    }
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      const level = Math.min(heading[1].length + 2, 5);
+      html.push(`<h${level}>${renderInline(heading[2].trim())}</h${level}>`);
+      i += 1;
+      continue;
+    }
+    if (isBullet(line)) {
+      const items = [];
+      while (i < lines.length && isBullet(lines[i])) {
+        items.push(`<li>${renderInline(lines[i].replace(/^\s*[-*]\s+/, ""))}</li>`);
+        i += 1;
+      }
+      html.push(`<ul>${items.join("")}</ul>`);
+      continue;
+    }
+    if (isOrdered(line)) {
+      const items = [];
+      while (i < lines.length && isOrdered(lines[i])) {
+        items.push(`<li>${renderInline(lines[i].replace(/^\s*\d+[.)]\s+/, ""))}</li>`);
+        i += 1;
+      }
+      html.push(`<ol>${items.join("")}</ol>`);
+      continue;
+    }
+    html.push(`<p>${renderInline(line)}</p>`);
+    i += 1;
+  }
+  return html.join("");
+}
+
 function formatInventoryNumber(number) {
   return `${INVENTORY_PREFIX}${String(number).padStart(INVENTORY_WIDTH, "0")}`;
 }
@@ -866,8 +941,13 @@ function appendChatMessage(role, text) {
   const label = document.createElement("span");
   label.className = "chat-role";
   label.textContent = role === "user" ? "Vos" : role === "error" ? "Error" : "ChatBot";
-  const content = document.createElement("span");
-  content.textContent = text;
+  const content = document.createElement("div");
+  content.className = "chat-content";
+  if (role === "assistant") {
+    content.innerHTML = renderMarkdown(text);
+  } else {
+    content.textContent = text;
+  }
   bubble.append(label, content);
   wrapper.append(bubble);
   elements.chatLog.append(wrapper);
@@ -891,7 +971,7 @@ async function loadChatStatus() {
       : "";
     elements.chatStatus.classList.toggle("error", status.available === false);
     elements.chatStatus.textContent = status.available
-      ? `Modelo económico: ${status.model}${files}`
+      ? `Modelo: ${status.model}${files}`
       : status.detail || "El asistente no está disponible.";
   } catch (error) {
     elements.chatStatus.classList.add("error");
@@ -921,7 +1001,7 @@ async function sendChatQuestion(question) {
     chatHistory.push({ role: "assistant", content: result.reply });
     chatHistory = chatHistory.slice(-8);
     elements.chatStatus.classList.remove("error");
-    elements.chatStatus.textContent = `Modelo económico: ${result.model}`;
+    elements.chatStatus.textContent = `Modelo: ${result.model}`;
   } catch (error) {
     pending.remove();
     appendChatMessage("error", error.message);

@@ -73,7 +73,15 @@ _SYSTEM_PROMPT = (
     "los números se muestran como INV-000062.\n"
     "- Del ejemplar solo se conoce la encuadernación u observaciones: no inventes estado "
     "físico, préstamos ni disponibilidad.\n"
-    "- Si te piden totales, usá el resumen del inventario que se incluye."
+    "- Si te piden totales, usá el resumen del inventario que se incluye.\n"
+    "Formato de la respuesta:\n"
+    "- Escribí en Markdown, con un tono cálido, claro y humano, como una bibliotecaria.\n"
+    "- Empezá con una frase breve que responda directamente; después, si hace falta, ampliá.\n"
+    "- Usá **negrita** para los datos clave (horarios, fechas, números de inventario, títulos).\n"
+    "- Para listar varios libros, usá una tabla de Markdown con las columnas «Nº inv.» y "
+    "«Título» (o «Autor» si viene al caso).\n"
+    "- Para pasos o listas cortas, usá viñetas.\n"
+    "- Sé concisa: no repitas la pregunta, no agregues secciones vacías ni relleno."
 )
 
 _STOPWORDS = {
@@ -243,7 +251,13 @@ def _sanitize_history(history) -> list[dict[str, str]]:
 
 
 def _api_key() -> str:
-    return _setting("CHATBOT_API_KEY") or _setting("DEEPSEEK_API_KEY")
+    key = _setting("CHATBOT_API_KEY")
+    if key:
+        return key
+    # Si el chat apunta a otro proveedor, no reusamos la clave de DeepSeek.
+    if _setting("CHATBOT_BASE_URL"):
+        return ""
+    return _setting("DEEPSEEK_API_KEY")
 
 
 def _base_url() -> str:
@@ -396,6 +410,11 @@ def answer_question(
         if response.status_code in (401, 402, 403):
             raise ChatbotUnavailable(
                 f"El proveedor del asistente rechazó la clave o el saldo: {detail}"
+            )
+        if response.status_code == 429:
+            raise ChatbotError(
+                "El asistente está recibiendo muchas consultas en este momento. "
+                "Esperá unos segundos y volvé a intentar."
             )
         raise ChatbotError(
             f"La API del asistente respondió con el estado {response.status_code}: {detail}"
