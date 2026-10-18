@@ -39,7 +39,7 @@ def parse_inventory_csv(text: str) -> list[dict[str, object]]:
         (
             index
             for index, row in enumerate(rows)
-            if {"seccion", "autor", "titulo", "piedeimprenta"}.issubset(
+            if {"autor", "titulo", "piedeimprenta"}.issubset(
                 {normalize_header(cell) for cell in row}
             )
             and any("inv" in normalize_header(cell) for cell in row)
@@ -48,7 +48,7 @@ def parse_inventory_csv(text: str) -> list[dict[str, object]]:
     )
     if header_index is None:
         raise ValueError(
-            "No encontré los encabezados Sección, N° Inv., Autor, Título y Pie de Imprenta."
+            "No encontré los encabezados N° Inv., Autor, Título y Pie de Imprenta."
         )
 
     headers = [normalize_header(value) for value in rows[header_index]]
@@ -57,7 +57,6 @@ def parse_inventory_csv(text: str) -> list[dict[str, object]]:
         return next((index for index, name in enumerate(headers) if predicate(name)), -1)
 
     columns = {
-        "section": find_column(lambda name: name == "seccion"),
         "inventory": find_column(lambda name: "inv" in name),
         "author": find_column(lambda name: name == "autor"),
         "title": find_column(lambda name: name == "titulo"),
@@ -80,7 +79,7 @@ def parse_inventory_csv(text: str) -> list[dict[str, object]]:
         record = {key: cell(column) for key, column in columns.items()}
         if not record["inventory"] and not record["title"] and not record["author"]:
             continue
-        required = ("section", "inventory", "author", "title")
+        required = ("inventory", "author", "title")
         missing = [name for name in required if not record[name]]
         if missing:
             errors.append(f"fila {row_index}: faltan campos obligatorios")
@@ -122,7 +121,6 @@ def parse_inventory_csv(text: str) -> list[dict[str, object]]:
 def record_to_dict(record) -> dict[str, object]:
     return {
         "id": record.id,
-        "section": record.section,
         "title": record.title,
         "author": record.author,
         "imprint": record.imprint or "",

@@ -11,8 +11,8 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=5" />
-    <script src="app.js?v=5" defer></script>
+    <link rel="stylesheet" href="styles.css?v=6" />
+    <script src="app.js?v=6" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -100,11 +100,6 @@
               <div class="stat-foot"><span class="stat-dot dot-blue"></span>Números individuales asignados</div>
             </article>
             <article class="stat-card">
-              <div class="stat-top"><span class="stat-label">Secciones</span><span class="stat-icon icon-green"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16m-16 6h16"/><circle cx="7" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/></svg></span></div>
-              <div class="stat-value" id="stat-sections">0</div>
-              <div class="stat-foot"><span class="stat-dot dot-green"></span>Áreas del catálogo</div>
-            </article>
-            <article class="stat-card">
               <div class="stat-top"><span class="stat-label">Rango de inventario</span><span class="stat-icon icon-amber"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/><path d="M8 5v4m8 1v4m-5 1v4"/></svg></span></div>
               <div class="stat-value stat-value-range" id="stat-range">—</div>
               <div class="stat-foot"><span class="stat-dot dot-amber"></span>Primer a último número asignado</div>
@@ -128,6 +123,7 @@
                   Leer imagen (OCR)
                 </label>
                 <input id="ocr-input" type="file" accept="image/*" hidden />
+                <span class="ocr-status" id="ocr-status" role="status" hidden><span class="spinner" aria-hidden="true"></span><span id="ocr-status-text">Escaneando la imagen…</span></span>
                 <button class="button button-export" id="export-button" type="button">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v11m0 0 4-4m-4 4-4-4M5 16.5v4h14v-4"/></svg>
                   Exportar CSV
@@ -149,18 +145,12 @@
                 <input id="search-input" type="search" placeholder="Buscar título, autor o número de inventario..." autocomplete="off" />
                 <kbd>⌘ K</kbd>
               </label>
-              <label class="filter-box">
-                <span class="sr-only">Filtrar por sección</span>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10m-7 6h4"/></svg>
-                <select id="category-filter" aria-label="Filtrar por sección"><option value="">Todas las secciones</option></select>
-                <svg class="select-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
-              </label>
             </div>
 
             <div class="table-wrap">
               <table>
                 <thead>
-                  <tr><th scope="col">NÚMEROS DE INVENTARIO</th><th scope="col">TÍTULO / AUTOR</th><th scope="col">SECCIÓN</th><th scope="col">PIE DE IMPRENTA</th><th scope="col">EJEMPLARES</th><th scope="col">ENCUADERNACIÓN / OBS.</th><th scope="col"><span class="sr-only">Acciones</span></th></tr>
+                  <tr><th scope="col">NÚMEROS DE INVENTARIO</th><th scope="col">TÍTULO / AUTOR</th><th scope="col">PIE DE IMPRENTA</th><th scope="col">EJEMPLARES</th><th scope="col">ENCUADERNACIÓN / OBS.</th><th scope="col"><span class="sr-only">Acciones</span></th></tr>
                 </thead>
                 <tbody id="book-list"></tbody>
               </table>
@@ -180,7 +170,7 @@
             <div class="chat-header">
               <div>
                 <div class="panel-title-line"><h2 id="chat-title">ChatBot del inventario</h2><span class="total-pill" id="chat-model-pill">DeepSeek</span></div>
-                <p class="panel-subtitle">Preguntá por títulos, autores, secciones o números de inventario. Responde solo con lo que figura en el catálogo.</p>
+                <p class="panel-subtitle">Preguntá por títulos, autores o números de inventario, y por el funcionamiento de la biblioteca. Responde solo con lo que figura en el catálogo y en las normas internas.</p>
               </div>
               <button class="button button-export" id="chat-clear-button" type="button">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m2 0v11.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 7 18.5V7"/></svg>
@@ -190,7 +180,7 @@
             <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-label="Conversación con el asistente"></div>
             <div class="chat-suggestions" id="chat-suggestions">
               <button type="button" class="chat-chip" data-question="¿Cuántos registros y ejemplares hay en el inventario?">¿Cuántos libros hay?</button>
-              <button type="button" class="chat-chip" data-question="¿Qué secciones tiene el catálogo y cuántos libros hay en cada una?">¿Qué secciones hay?</button>
+              <button type="button" class="chat-chip" data-question="¿Tenés algún libro del autor Borges?">Buscar un libro</button>
               <button type="button" class="chat-chip" data-question="¿A qué registro pertenece el número INV-000062?">¿De quién es INV-000062?</button>
               <button type="button" class="chat-chip" data-question="¿Puedo llevarme un libro a mi casa? ¿Cómo me hago socio?">Préstamos y socio</button>
               <button type="button" class="chat-chip" data-question="¿Cómo se solicitan las computadoras y qué pasa si pierdo o rompo un libro?">Computadoras y responsabilidad</button>
@@ -232,8 +222,7 @@
           <p class="ocr-note" id="ocr-note"></p>
         </div>
         <div class="form-grid">
-          <label class="form-field">N° de inventario <span class="required">*</span><input name="inventoryRange" required maxlength="40" placeholder="62 o 62-71" aria-describedby="inventory-help" /><span class="field-help" id="inventory-help">Se normaliza a INV-000062, INV-000063…</span></label>
-          <label class="form-field">Sección <span class="required">*</span><input name="section" required maxlength="120" list="category-options" placeholder="Ej. Educación" /></label>
+          <label class="form-field field-wide">N° de inventario <span class="required">*</span><input name="inventoryRange" required maxlength="40" placeholder="62 o 62-71" aria-describedby="inventory-help" /><span class="field-help" id="inventory-help">Se normaliza a INV-000062, INV-000063…</span></label>
           <label class="form-field field-wide">Título <span class="required">*</span><input name="title" required maxlength="300" placeholder="Título tal como figura en el catálogo" /></label>
           <label class="form-field field-wide">Autor/a <span class="required">*</span><input name="author" required maxlength="300" placeholder="Autor o autores" /></label>
           <label class="form-field field-wide">Pie de imprenta<input name="imprint" maxlength="300" placeholder="Lugar: editorial, año" /></label>
@@ -277,7 +266,6 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5m0 3.5v.01M10.3 3.9 2.6 17.4A1.6 1.6 0 0 0 4 19.9h16a1.6 1.6 0 0 0 1.4-2.5L13.7 3.9a1.6 1.6 0 0 0-2.8 0Z"/></svg>
           <span id="scan-alert-message"></span>
         </div>
-        <label class="form-field scan-section">Sección para todos <span class="required">*</span><input id="scan-section" list="category-options" maxlength="120" placeholder="Ej. Educación" /></label>
         <div class="scan-list" id="scan-list"></div>
         <p class="form-error" id="scan-error" role="alert" hidden></p>
         <div class="dialog-actions">
@@ -286,7 +274,6 @@
         </div>
       </div>
     </dialog>
-    <datalist id="category-options"></datalist>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>

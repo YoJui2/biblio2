@@ -55,12 +55,14 @@ Para digitalizar fichas escaneadas sin transcribirlas a mano, el panel usa por d
 3. El texto reconocido se divide en una propuesta por cada fila.
 4. Según cuántas fichas haya:
    - **Una sola ficha:** se abre el formulario **Agregar registro** con los campos reconocidos y la imagen de referencia.
-   - **Varias fichas (multiregistro):** se abre el panel **Registros detectados**, con la imagen y una fila editable por cada libro; elegís una **sección para todos**, corregís lo que haga falta y guardás todo junto con `POST /api/books/bulk`.
+    - **Varias fichas (multiregistro):** se abre el panel **Registros detectados**, con la imagen y una fila editable por cada libro; corregís lo que haga falta y guardás todo junto con `POST /api/books/bulk`.
 5. Revisá y corregí los campos, y guardá. **El OCR nunca escribe en la base por su cuenta**: solo propone valores.
 
 Si una ficha tiene varios números de inventario (un rango como `62-72` o una lista como `62, 65, 78`), el formulario los carga **todos**; el campo acepta números sueltos separados por comas y rangos. Un mismo registro bibliográfico puede tener muchos ejemplares.
 
-La respuesta de `/api/ocr/scan` incluye `records` (lista de propuestas), `engine` (`deepseek` o `trocr`), `confidence`, `raw_text` y `warnings` (por ejemplo, si no reconoció números de inventario, si no encontró título/autor o si la confianza es baja). Las secciones conocidas del catálogo se envían a la API para mejorar la detección del campo `Sección`.
+La respuesta de `/api/ocr/scan` incluye `records` (lista de propuestas), `engine` (`deepseek` o `trocr`), `confidence`, `raw_text` y `warnings` (por ejemplo, si no reconoció números de inventario, si no encontró título/autor o si la confianza es baja).
+
+Mientras el servidor procesa una imagen, el panel muestra un **indicador de progreso** junto a la barra de acciones (con su leyenda «Escaneando la imagen…») y un aviso al iniciar la lectura, para que quede claro que el OCR puede tardar unos segundos.
 
 Configuración en `.env`:
 
@@ -71,6 +73,10 @@ Configuración en `.env`:
 | `DEEPSEEK_BASE_URL` | URL base de la API; por defecto `https://api.deepseek.com`. |
 | `DEEPSEEK_MODEL` | Modelo de visión del OCR; por defecto `deepseek-flash`. |
 | `DEEPSEEK_CHAT_MODEL` | Modelo del ChatBot; por defecto `deepseek-chat`, el más económico. |
+| `CHATBOT_API_KEY` | Clave del proveedor del ChatBot (opcional; en blanco usa `DEEPSEEK_API_KEY`). |
+| `CHATBOT_BASE_URL` | URL base del proveedor OpenAI-compatible del ChatBot (opcional; en blanco usa `DEEPSEEK_BASE_URL`). |
+| `CHATBOT_MODEL` | Modelo de chat (opcional; en blanco usa `DEEPSEEK_CHAT_MODEL`). Permite apuntar a un modelo **gratuito**. |
+| `LIBRARY_CONTEXT_DIR` | Carpeta con la base de conocimiento institucional; por defecto `./Entrevistas_Contexto`. |
 | `TROCR_MODEL` | Modelo local de respaldo en Hugging Face; por defecto `microsoft/trocr-base-handwritten`. |
 
 La primera lectura con TrOCR puede tardar más porque carga el modelo en memoria. El reconocimiento es una **propuesta**: los rangos repetidos, ilegibles o ambiguos deben corregirse antes de guardar, igual que con la importación por CSV.
@@ -85,14 +91,15 @@ La primera lectura con TrOCR puede tardar más porque carga el modelo en memoria
 
 ## ChatBot del inventario
 
-En el menú principal, debajo de **Inventario**, está **ChatBot**: un asistente que responde preguntas sobre el catálogo y sobre el funcionamiento interno de la biblioteca en lenguaje natural. Antes de cada consulta, la API arma un **resumen** del inventario (registros, ejemplares y secciones) y un listado compacto de las fichas (`INV-000062 | Sección | «Título» | Autor | Pie de imprenta | Encuadernación`). Ese contexto más la **base de conocimiento institucional** se envían a la API de DeepSeek con el **modelo de chat más económico** (`deepseek-chat`), y el asistente responde **solo con esos datos**.
+En el menú principal, debajo de **Inventario**, está **ChatBot**: un asistente que responde preguntas sobre el catálogo y sobre el funcionamiento interno de la biblioteca en lenguaje natural. Antes de cada consulta, la API arma un **resumen** del inventario (registros, ejemplares y rango de inventario) y un listado compacto de las fichas (`INV-000062 | «Título» | Autor | Pie de imprenta | Encuadernación`). Ese contexto más la **base de conocimiento institucional** se envían a la API de DeepSeek con el **modelo de chat más económico** (`deepseek-chat`), y el asistente responde **solo con esos datos**.
 
-- **Inventario:** responde por título, autor, sección, pie de imprenta o número de inventario; también puede contar registros y ejemplares.
+- **Inventario:** responde por título, autor, pie de imprenta o número de inventario; también puede contar registros y ejemplares.
 - **Institucional:** responde sobre préstamos, asociación, sanciones, horarios, computadoras y criterios internos, a partir de las entrevistas de la carpeta [`Entrevistas_Contexto/`](./Entrevistas_Contexto/).
-- Si el libro **no está en el catálogo**, lo dice y sugiere revisar el título, el autor o la sección. Si la pregunta **no está en ninguna fuente** o es confusa, pide que la reformulen en lugar de adivinar.
+- Si el libro **no está en el catálogo**, lo dice y sugiere revisar el título o el autor. Si la pregunta **no está en ninguna fuente** o es confusa, pide que la reformulen en lugar de adivinar.
 - No inventa disponibilidad ni préstamos: del ejemplar solo se conoce la encuadernación u observaciones. Si las normas internas y el inventario se contradicen sobre disponibilidad, prioriza el inventario.
 - La conversación recentísima se envía como historial para dar contexto, y se mantiene **en el navegador**: al recargar o pulsar **Limpiar chat** se reinicia.
-- Si falta `DEEPSEEK_API_KEY`, `GET /api/chat/status` devuelve `available: false` y el panel lo avisa.
+- Si falta la API key (`CHATBOT_API_KEY` o `DEEPSEEK_API_KEY`), `GET /api/chat/status` devuelve `available: false` y el panel lo avisa.
+- El ChatBot puede usar **cualquier proveedor compatible con OpenAI** (y por lo tanto un modelo **gratuito**) definiendo `CHATBOT_API_KEY`, `CHATBOT_BASE_URL` y `CHATBOT_MODEL`. Si se dejan en blanco, usa DeepSeek con `deepseek-chat`.
 
 ### Base de conocimiento institucional
 
@@ -108,14 +115,13 @@ El importador reconoce la fila de encabezados aunque antes haya filas de título
 
 | Columna | Uso en el panel |
 | --- | --- |
-| `Sección` | Área o sección temática del catálogo; también alimenta el filtro. |
 | `N° Inv.` | Número único o rango de inventario, por ejemplo `62` o `62-71`. |
 | `Autor` | Autor o autores tal como aparecen en el registro. |
 | `Título` | Título bibliográfico. |
 | `Pie de Imprenta` | Lugar, editorial y año, como texto libre. |
 | `Encuadernación / Observaciones` | Encuadernación y notas heredadas del catálogo. No representa un estado de préstamo. |
 
-El CSV actual tiene **195 registros bibliográficos**, **751 números de inventario** y **5 secciones**.
+El CSV actual tiene **195 registros bibliográficos** y **751 números de inventario**.
 
 ### Normalización de números
 
@@ -129,7 +135,7 @@ El panel conserva cada número de ejemplar como entero y lo representa con el pr
 
 Los extremos del rango son inclusivos. Un número no puede pertenecer a más de un registro. El panel conserva los números individuales, aunque en la tabla compacta visualmente los rangos consecutivos; la columna «Ejemplares» indica cuántos números individuales contiene.
 
-Al exportar, el panel escribe los rangos con prefijos normalizados, por ejemplo `INV-000062-INV-000071`. La exportación incluye los filtros de búsqueda y sección activos; borrá los filtros antes de exportar el catálogo completo.
+Al exportar, el panel escribe los rangos con prefijos normalizados, por ejemplo `INV-000062-INV-000071`. La exportación incluye el filtro de búsqueda activo; borralo antes de exportar el catálogo completo.
 
 ## Importación y reemplazos
 
@@ -176,12 +182,12 @@ docker compose up --build
 | Un registro tiene `62-71` | Se carga como diez números individuales, asociados al mismo registro. | El panel no crea diez fichas bibliográficas duplicadas. |
 | Dos filas asignan el mismo número, incluso si una lo incluye dentro de un rango | Se rechaza la importación completa y se informa el número repetido. | Corregí el conflicto en el Excel/CSV y volvé a importar. |
 | Un rango es descendente (`71-62`), empieza en cero, no es numérico o tiene más de 10.000 números | Se rechaza la importación completa. | Corregí el valor; los rangos deben ser ascendentes, mayores que cero y acotados. |
-| Faltan sección, número, título o autor | Se informa el error de fila y no se reemplazan los datos actuales. | Completá el registro en el archivo fuente. |
+| Faltan número, título o autor | Se informa el error de fila y no se reemplazan los datos actuales. | Completá el registro en el archivo fuente. |
 | El archivo está mal formado o tiene comillas sin cerrar | Se rechaza la importación. | Revisá el CSV exportado por la planilla y volvé a guardarlo en formato CSV. |
 | Se confirma una importación mientras ya hay registros cargados | Se reemplaza el catálogo completo de MySQL en una transacción; no se mezclan filas ni se hace una actualización por título. | Exportá una copia antes si necesitás conservar el estado anterior. |
 | Se cancela la confirmación | No se cambia el catálogo. | No hace falta restaurar datos. |
 | Se edita el rango de un registro | Se reemplaza su conjunto de números; la validación impide conflictos con otros registros. | Una edición incorrecta podría liberar números que estaban asignados a ese registro. |
-| La imagen escaneada contiene varias fichas (multiregistro) | El OCR devuelve una propuesta por fila y el panel abre **Registros detectados**; al confirmar se guardan juntas con `POST /api/books/bulk` (transacción atómica). | Corregí cada fila y elegí la sección; si hay números repetidos entre filas o ya asignados, se rechaza todo el lote. |
+| La imagen escaneada contiene varias fichas (multiregistro) | El OCR devuelve una propuesta por fila y el panel abre **Registros detectados**; al confirmar se guardan juntas con `POST /api/books/bulk` (transacción atómica). | Corregí cada fila; si hay números repetidos entre filas o ya asignados, se rechaza todo el lote. |
 | Se escanea una imagen con un formato distinto al esperado | Si no hay filas con separadores `\|`, el intérprete cae al modo de un solo registro. | Revisá la propuesta; si vino mal, cargá los campos a mano o mejorá la toma. |
 | Se elimina un registro | Se mueve a la papelera; deja de contar en el catálogo. | Se puede restaurar o borrar definitivamente desde **Papelera**. |
 | Se exporta con búsqueda o filtro activo | Solo se exportan las filas visibles. | Quitá filtros para obtener el inventario completo. |
@@ -202,7 +208,7 @@ El CSV agrupa varios números bajo un mismo registro bibliográfico. Esto modela
 
 ## Modelo de datos y próximos pasos
 
-1. **Modelo separado:** ya se separa `BibliographicRecord` de `InventoryCopy`. Un registro bibliográfico guarda sección, autor, título, pie de imprenta, observaciones generales y `deleted_at` (papelera); cada ejemplar guarda un número de inventario único entre los registros activos.
+1. **Modelo separado:** ya se separa `BibliographicRecord` de `InventoryCopy`. Un registro bibliográfico guarda autor, título, pie de imprenta, observaciones generales y `deleted_at` (papelera); cada ejemplar guarda un número de inventario único entre los registros activos.
 2. **Importación no destructiva:** la primera API implementa reemplazo total explícito y atómico. Como mejora, ofrecer una vista previa con conteo de altas, cambios, bajas y conflictos antes de confirmar, además de actualización por número de inventario.
 3. **Conflictos de identidad:** usar el número de inventario como identificador único del ejemplar. No fusionar registros por título o autor automáticamente: esos campos pueden repetirse o variar en su escritura.
 4. **Trazabilidad:** guardar archivo, fecha, usuario, fila de origen, número original y resultado de cada importación; permitir descargar un informe de filas omitidas o conflictivas.

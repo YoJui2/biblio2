@@ -5,7 +5,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class RecordFields(BaseModel):
-    section: str = Field(min_length=1, max_length=160)
     title: str = Field(min_length=1, max_length=500)
     author: str = Field(min_length=1, max_length=500)
     imprint: str = Field(default="", max_length=10000)
@@ -13,7 +12,7 @@ class RecordFields(BaseModel):
     inventory_numbers: list[int] = Field(min_length=1, max_length=10000)
     inventory_source: str = Field(default="", max_length=120)
 
-    @field_validator("section", "title", "author")
+    @field_validator("title", "author")
     @classmethod
     def required_text_is_not_blank(cls, value: str) -> str:
         value = value.strip()
@@ -41,7 +40,6 @@ class RecordUpdate(RecordFields):
 
 class RecordRead(BaseModel):
     id: int
-    section: str
     title: str
     author: str
     imprint: str
@@ -56,7 +54,6 @@ class RecordRead(BaseModel):
 class ImportResult(BaseModel):
     records: int
     copies: int
-    sections: int
 
 
 class BulkCreateResult(BaseModel):
@@ -84,7 +81,6 @@ class OCRResult(BaseModel):
     raw_text: str
     width: int
     height: int
-    section: str = ""
     title: str = ""
     author: str = ""
     imprint: str = ""
@@ -95,7 +91,6 @@ class OCRResult(BaseModel):
 
 
 class OCRRecord(BaseModel):
-    section: str = ""
     title: str = ""
     author: str = ""
     imprint: str = ""

@@ -15,14 +15,12 @@ def test_interpret_labeled_scan_returns_catalog_fields() -> None:
         "INV-000062\n"
         "Serie de Módulos\n"
         "Autor: Juan Pérez\n"
-        "Sección: Educación\n"
         "Buenos Aires: Editorial, 2020\n"
         "Cartoné\n"
     )
 
     result = interpret_ocr_text(text)
 
-    assert result["section"] == "Educación"
     assert result["title"] == "Serie de Módulos"
     assert result["author"] == "Juan Pérez"
     assert result["imprint"] == "Buenos Aires: Editorial, 2020"
@@ -66,12 +64,11 @@ def test_interpret_reads_labeled_range_without_losing_numbers() -> None:
     assert result["inventory_source"] == "62-72"
 
 
-def test_interpret_detects_known_section_and_title_author() -> None:
-    text = "Educación\nMatemática 6\nMaría López\n"
+def test_interpret_detects_title_and_author_from_lines() -> None:
+    text = "Matemática 6\nMaría López\n"
 
-    result = interpret_ocr_text(text, known_sections=["Educación", "Lengua"])
+    result = interpret_ocr_text(text)
 
-    assert result["section"] == "Educación"
     assert result["title"] == "Matemática 6"
     assert result["author"] == "María López"
 

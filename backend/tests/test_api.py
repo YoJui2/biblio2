@@ -26,7 +26,6 @@ def test_health_and_crud_preserve_unique_inventory_numbers(client: TestClient) -
         "database": "connected",
     }
     payload = {
-        "section": "Literatura",
         "title": "Libro de prueba",
         "author": "Autora de prueba",
         "imprint": "Buenos Aires: Editorial, 2020",
@@ -56,7 +55,6 @@ def test_health_and_crud_preserve_unique_inventory_numbers(client: TestClient) -
 
 def test_delete_all_records_clears_catalog(client: TestClient) -> None:
     payload = {
-        "section": "Literatura",
         "title": "Libro de prueba",
         "author": "Autora de prueba",
         "inventory_numbers": [62, 63],
@@ -80,7 +78,6 @@ def test_delete_all_records_clears_catalog(client: TestClient) -> None:
 
 def _payload(**overrides) -> dict:
     base = {
-        "section": "Literatura",
         "title": "Registro de prueba",
         "author": "Autora de prueba",
         "inventory_numbers": [80, 81],
@@ -172,8 +169,8 @@ def test_bulk_create_rejects_empty_batch(client: TestClient) -> None:
 def test_csv_import_is_atomic_and_expands_inventory_ranges(client: TestClient) -> None:
     csv_text = (
         "Inventario de prueba\n"
-        'Sección,N° Inv.,Autor,Título,Pie de Imprenta,Encuadernación / Observaciones\n'
-        'Literatura,62-71,Autor,"Título, con coma",Editorial,Cartoné\n'
+        'N° Inv.,Autor,Título,Pie de Imprenta,Encuadernación / Observaciones\n'
+        '62-71,Autor,"Título, con coma",Editorial,Cartoné\n'
     )
     response = client.post(
         "/api/import?mode=replace",
@@ -181,7 +178,7 @@ def test_csv_import_is_atomic_and_expands_inventory_ranges(client: TestClient) -
     )
 
     assert response.status_code == 200
-    assert response.json() == {"records": 1, "copies": 10, "sections": 1}
+    assert response.json() == {"records": 1, "copies": 10}
     imported = client.get("/api/books").json()
     assert imported[0]["inventory_numbers"] == list(range(62, 72))
 
@@ -194,9 +191,9 @@ def test_csv_import_is_atomic_and_expands_inventory_ranges(client: TestClient) -
     assert client.get("/api/books").json() == imported
 
     invalid_csv = (
-        "Sección,N° Inv.,Autor,Título,Pie de Imprenta,Encuadernación / Observaciones\n"
-        "Literatura,1-3,Autor,Título A,Editorial,Cartoné\n"
-        "Literatura,3-5,Autor,Título B,Editorial,Cartoné\n"
+        "N° Inv.,Autor,Título,Pie de Imprenta,Encuadernación / Observaciones\n"
+        "1-3,Autor,Título A,Editorial,Cartoné\n"
+        "3-5,Autor,Título B,Editorial,Cartoné\n"
     )
     rejected = client.post(
         "/api/import?mode=replace",

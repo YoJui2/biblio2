@@ -29,6 +29,10 @@ services:
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
       DEEPSEEK_CHAT_MODEL: ${DEEPSEEK_CHAT_MODEL:-deepseek-chat}
+      CHATBOT_API_KEY: ${CHATBOT_API_KEY:-}
+      CHATBOT_BASE_URL: ${CHATBOT_BASE_URL:-}
+      CHATBOT_MODEL: ${CHATBOT_MODEL:-}
+      LIBRARY_CONTEXT_DIR: ${LIBRARY_CONTEXT_DIR:-}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

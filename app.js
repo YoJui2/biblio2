@@ -9,7 +9,8 @@ const elements = {
   emptyTitle: document.querySelector("#empty-title"),
   emptyDescription: document.querySelector("#empty-description"),
   search: document.querySelector("#search-input"),
-  categoryFilter: document.querySelector("#category-filter"),
+  ocrStatus: document.querySelector("#ocr-status"),
+  ocrStatusText: document.querySelector("#ocr-status-text"),
   dialog: document.querySelector("#book-dialog"),
   form: document.querySelector("#book-form"),
   dialogTitle: document.querySelector("#dialog-title"),
@@ -32,7 +33,6 @@ const elements = {
   emptyTrashButton: document.querySelector("#empty-trash-button"),
   scanDialog: document.querySelector("#scan-dialog"),
   scanList: document.querySelector("#scan-list"),
-  scanSection: document.querySelector("#scan-section"),
   scanError: document.querySelector("#scan-error"),
   scanSaveButton: document.querySelector("#scan-save-button"),
   scanAlert: document.querySelector("#scan-alert"),
@@ -64,7 +64,7 @@ let chatHistory = [];
 let chatBusy = false;
 let chatStarted = false;
 
-const CHAT_WELCOME = "Hola, soy el asistente de la biblioteca. Preguntame por un libro (título, autor, sección o un número como INV-000062) o por el funcionamiento de la biblioteca: préstamos, cómo asociarte, horarios y computadoras. Si no está en el catálogo o no lo sé, te lo digo.";
+const CHAT_WELCOME = "Hola, soy el asistente de la biblioteca. Preguntame por un libro (título, autor o un número como INV-000062) o por el funcionamiento de la biblioteca: préstamos, cómo asociarte, horarios y computadoras. Si no está en el catálogo o no lo sé, te lo digo.";
 
 function applyTheme(theme) {
   const selectedTheme = theme === "light" ? "light" : "dark";
@@ -99,7 +99,6 @@ function toggleTheme() {
 function fromApiRecord(record) {
   return {
     id: String(record.id),
-    section: record.section,
     title: record.title,
     author: record.author,
     imprint: record.imprint,
@@ -227,34 +226,20 @@ function inventoryText(numbers) {
 
 function getFilteredBooks() {
   const query = elements.search.value.trim().toLocaleLowerCase("es");
-  const section = elements.categoryFilter.value;
   return books.filter((book) => {
     const searchable = [
-      book.title, book.author, book.section, book.imprint, book.binding,
+      book.title, book.author, book.imprint, book.binding,
       ...book.inventoryNumbers.map(formatInventoryNumber),
       book.inventorySource,
     ].join(" ").toLocaleLowerCase("es");
-    return (!query || searchable.includes(query)) && (!section || book.section === section);
+    return !query || searchable.includes(query);
   });
-}
-
-function renderCategories() {
-  const current = elements.categoryFilter.value;
-  const categories = [...new Set(books.map((book) => book.section).filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b, "es"));
-  elements.categoryFilter.innerHTML = '<option value="">Todas las secciones</option>'
-    + categories.map((section) => `<option value="${escapeHTML(section)}">${escapeHTML(section)}</option>`).join("");
-  if (categories.includes(current)) elements.categoryFilter.value = current;
-  document.querySelector("#category-options").innerHTML = categories
-    .map((section) => `<option value="${escapeHTML(section)}"></option>`).join("");
 }
 
 function renderStats() {
   const allNumbers = books.flatMap((book) => book.inventoryNumbers);
-  const sections = new Set(books.map((book) => book.section).filter(Boolean));
   document.querySelector("#stat-titles").textContent = books.length.toLocaleString("es");
   document.querySelector("#stat-copies").textContent = allNumbers.length.toLocaleString("es");
-  document.querySelector("#stat-sections").textContent = sections.size.toLocaleString("es");
   document.querySelector("#stat-range").textContent = allNumbers.length
     ? `${formatInventoryNumber(Math.min(...allNumbers))} – ${formatInventoryNumber(Math.max(...allNumbers))}`
     : "—";
@@ -264,7 +249,6 @@ function renderStats() {
 }
 
 function renderBooks() {
-  renderCategories();
   renderStats();
   const filtered = getFilteredBooks();
   document.querySelector("#results-count").textContent = filtered.length.toLocaleString("es");
@@ -275,7 +259,7 @@ function renderBooks() {
     const isFiltering = books.length > 0;
     elements.emptyTitle.textContent = isFiltering ? "No encontramos resultados" : "Todavía no hay registros";
     elements.emptyDescription.textContent = isFiltering
-      ? "Probá con otra búsqueda o cambiá el filtro de sección."
+      ? "Probá con otra búsqueda."
       : "Importá tu CSV para cargar el catálogo y expandir los rangos de inventario.";
     document.querySelector("#empty-add-button").textContent = isFiltering ? "Agregar registro" : "Agregar primer registro";
     document.querySelector("#empty-add-button").hidden = isFiltering;
@@ -286,7 +270,6 @@ function renderBooks() {
     return `<tr>
       <td class="inventory-number-cell" title="${escapeHTML(ids)}">${escapeHTML(ids)}</td>
       <td><div class="book-cell"><span class="book-cover cover-${index % 6}" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4.5h11a3 3 0 0 1 3 3v12H8a3 3 0 0 1-3-3v-12Z"/><path d="M5 16.5a3 3 0 0 1 3-3h11"/></svg></span><span class="book-copy"><span class="book-title" title="${title}">${title}</span><span class="book-author">${escapeHTML(book.author)}</span></span></div></td>
-      <td><span class="category-tag" title="${escapeHTML(book.section)}">${escapeHTML(book.section)}</span></td>
       <td class="imprint-cell" title="${escapeHTML(book.imprint)}">${escapeHTML(book.imprint || "—")}</td>
       <td><span class="unit-count">${book.inventoryNumbers.length}</span></td>
       <td class="binding-cell" title="${escapeHTML(book.binding)}">${escapeHTML(book.binding || "—")}</td>
@@ -335,7 +318,7 @@ function openDialog(book = null) {
   elements.saveButton.textContent = book ? "Guardar cambios" : "Agregar registro";
   if (book) {
     elements.form.elements.inventoryRange.value = compressNumbers(book.inventoryNumbers);
-    for (const name of ["section", "title", "author", "imprint", "binding"]) {
+    for (const name of ["title", "author", "imprint", "binding"]) {
       elements.form.elements[name].value = book[name] || "";
     }
   }
@@ -348,7 +331,6 @@ function fillFormFromOcr(result) {
     ? compressNumbers(result.inventory_numbers)
     : "";
   elements.form.elements.inventoryRange.value = range;
-  elements.form.elements.section.value = result.section || "";
   elements.form.elements.title.value = result.title || "";
   elements.form.elements.author.value = result.author || "";
   elements.form.elements.imprint.value = result.imprint || "";
@@ -454,20 +436,13 @@ function openScanRecords(result, imageUrl, records) {
   } else {
     hideScanAlert();
   }
-  elements.scanSection.value = elements.categoryFilter.value || "";
   renderScanRecords();
   elements.scanDialog.showModal();
-  elements.scanSection.focus();
+  elements.scanList.querySelector("input")?.focus();
 }
 
 async function saveScanRecords() {
-  const section = elements.scanSection.value.trim();
   elements.scanError.hidden = true;
-  if (!section) {
-    elements.scanError.textContent = "Elegí la sección que se aplicará a todos los registros.";
-    elements.scanError.hidden = false;
-    return;
-  }
   const rows = [...elements.scanList.querySelectorAll(".scan-row")];
   if (!rows.length) {
     elements.scanError.textContent = "No quedan filas para guardar.";
@@ -492,7 +467,6 @@ async function saveScanRecords() {
       return;
     }
     payload.push({
-      section,
       title,
       author,
       imprint: value("imprint"),
@@ -550,7 +524,6 @@ async function handleSubmit(event) {
   event.preventDefault();
   const data = new FormData(elements.form);
   const inventoryRange = String(data.get("inventoryRange")).trim();
-  const section = String(data.get("section")).trim();
   const title = String(data.get("title")).trim();
   const author = String(data.get("author")).trim();
   let inventoryNumbers;
@@ -561,13 +534,12 @@ async function handleSubmit(event) {
     elements.formError.hidden = false;
     return;
   }
-  if (!section || !title || !author) {
-    elements.formError.textContent = "Completá el número de inventario, la sección, el título y el autor.";
+  if (!title || !author) {
+    elements.formError.textContent = "Completá el número de inventario, el título y el autor.";
     elements.formError.hidden = false;
     return;
   }
   const updated = {
-    section,
     title,
     author,
     imprint: String(data.get("imprint")).trim(),
@@ -622,7 +594,6 @@ async function clearCatalog() {
   try {
     const result = await apiRequest("/api/books", { method: "DELETE" });
     elements.search.value = "";
-    elements.categoryFilter.value = "";
     const loaded = await refreshBooks();
     if (!loaded) return;
     await refreshTrashCount();
@@ -763,7 +734,6 @@ async function handleCsvFile(file) {
       result = await upload(true);
     }
     elements.search.value = "";
-    elements.categoryFilter.value = "";
     const loaded = await refreshBooks();
     if (!loaded) return;
     showToast(`Importados ${result.records} registros y ${result.copies} ejemplares numerados.`);
@@ -787,6 +757,12 @@ function setOcrBusy(busy, message) {
   document
     .querySelectorAll('label.button[for="ocr-input"], label.button[for="ocr-dialog-input"]')
     .forEach((element) => element.classList.toggle("busy", busy));
+  if (elements.ocrStatus) {
+    elements.ocrStatus.hidden = !busy;
+    if (busy && elements.ocrStatusText) {
+      elements.ocrStatusText.textContent = message || "Escaneando la imagen…";
+    }
+  }
 }
 
 function validateImageFile(file) {
@@ -832,7 +808,8 @@ async function handleOcrFile(file) {
   const imageUrl = URL.createObjectURL(file);
   if (elements.dialog.open) elements.formError.hidden = true;
   hideOcrAlert();
-  setOcrBusy(true, "Leyendo la imagen…");
+  setOcrBusy(true, "Escaneando la imagen…");
+  showToast("Escaneando la imagen… puede tardar unos segundos.");
   try {
     validateImageFile(file);
     const status = await getOcrStatus();
@@ -844,8 +821,6 @@ async function handleOcrFile(file) {
     }
     const formData = new FormData();
     formData.append("file", file);
-    const sections = [...new Set(books.map((book) => book.section).filter(Boolean))].join(",");
-    if (sections) formData.append("sections", sections);
     const result = await apiRequest("/api/ocr/scan", { method: "POST", body: formData });
     showOcrSuggestion(result, imageUrl);
   } catch (error) {
@@ -859,12 +834,11 @@ async function handleOcrFile(file) {
 }
 
 function exportCsv() {
-  const headers = ["Sección", "N° Inv.", "Autor", "Título", "Pie de Imprenta", "Encuadernación / Observaciones"];
+  const headers = ["N° Inv.", "Autor", "Título", "Pie de Imprenta", "Encuadernación / Observaciones"];
   const quote = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
   const lines = [
     headers.map(quote).join(","),
     ...getFilteredBooks().map((book) => [
-      book.section,
       inventoryText(book.inventoryNumbers).replaceAll("–", "-"),
       book.author,
       book.title,
@@ -993,7 +967,6 @@ document.querySelector("#cancel-button").addEventListener("click", () => element
 document.querySelector(".close-dialog").addEventListener("click", () => elements.dialog.close());
 elements.form.addEventListener("submit", handleSubmit);
 elements.search.addEventListener("input", renderBooks);
-elements.categoryFilter.addEventListener("change", renderBooks);
 document.querySelector("#export-button").addEventListener("click", exportCsv);
 document.querySelector("#clear-all-button")?.addEventListener("click", clearCatalog);
 document.querySelector("#trash-button")?.addEventListener("click", openTrash);

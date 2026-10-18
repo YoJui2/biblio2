@@ -108,7 +108,7 @@ def create_app(
             _active_inventory_numbers(session),
         )
         record = BibliographicRecord(
-            section=payload.section,
+            section="",
             title=payload.title,
             author=payload.author,
             imprint=payload.imprint,
@@ -156,7 +156,7 @@ def create_app(
         validate_numbers_not_in_use(numbers, _active_inventory_numbers(session))
         records = [
             BibliographicRecord(
-                section=item.section,
+                section="",
                 title=item.title,
                 author=item.author,
                 imprint=item.imprint,
@@ -199,7 +199,6 @@ def create_app(
             raise HTTPException(status_code=404, detail="No se encontró el registro.")
         in_use = _active_inventory_numbers(session, exclude_record_id=record_id)
         validate_numbers_not_in_use(payload.inventory_numbers, in_use)
-        record.section = payload.section
         record.title = payload.title
         record.author = payload.author
         record.imprint = payload.imprint
@@ -399,7 +398,6 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(error)) from error
 
         total_numbers = sum(len(record["inventory_numbers"]) for record in records)
-        sections = {str(record["section"]) for record in records}
         try:
             with session.begin():
                 current_count = session.scalar(
@@ -421,7 +419,7 @@ def create_app(
                     numbers = item["inventory_numbers"]
                     assert isinstance(numbers, list)
                     record = BibliographicRecord(
-                        section=str(item["section"]),
+                        section="",
                         title=str(item["title"]),
                         author=str(item["author"]),
                         imprint=str(item["imprint"]),
@@ -442,7 +440,6 @@ def create_app(
         return ImportResult(
             records=len(records),
             copies=total_numbers,
-            sections=len(sections),
         )
 
     @application.get("/api/ocr/status", response_model=OCRStatus, tags=["ocr"])
@@ -456,7 +453,6 @@ def create_app(
     )
     async def scan_record_image(
         file: Annotated[UploadFile, File()],
-        sections: Annotated[str | None, Form()] = None,
     ):
         suffix = Path(file.filename or "").suffix.lower()
         content_type = file.content_type or ""
@@ -486,11 +482,8 @@ def create_app(
             )
         if not content:
             raise HTTPException(status_code=400, detail="El archivo llegó vacío.")
-        known_sections = [
-            value.strip() for value in (sections or "").split(",") if value.strip()
-        ]
         try:
-            return ocr.scan_image_bytes(content, known_sections)
+            return ocr.scan_image_bytes(content)
         except ocr.OcrUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
         except ocr.OcrError as error:

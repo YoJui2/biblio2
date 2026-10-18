@@ -110,7 +110,6 @@ _BINDING_KEYWORDS = (
 
 _LABELS = (
     ("inventory", r"inv|inventario|ninv|numeros?deinventario"),
-    ("section", r"seccion|area|coleccion"),
     ("title", r"titulo|obra"),
     ("author", r"autor(?:a|es)?"),
     ("imprint", r"pie(?:de)?imprenta|imprenta|editorial|edicion|publicacion|pie"),
@@ -200,12 +199,9 @@ def _looks_binding(line: str) -> bool:
     return any(normalize_text(word) in normalized for word in _BINDING_KEYWORDS)
 
 
-def interpret_ocr_text(
-    text: str, known_sections: list[str] | None = None
-) -> dict[str, object]:
+def interpret_ocr_text(text: str) -> dict[str, object]:
     """Convierte texto OCR en una propuesta de campos del catálogo."""
 
-    sections = [section.strip() for section in (known_sections or []) if section and section.strip()]
     lines = [line.strip() for line in re.split(r"[\r\n]+", text or "")]
     lines = [line for line in lines if line]
 
@@ -217,20 +213,6 @@ def interpret_ocr_text(
             labeled.setdefault(label, []).append(value)
         else:
             content_lines.append(line)
-
-    section = labeled.get("section", [""])[0]
-    if not section and sections:
-        best = ""
-        for line in lines:
-            normalized_line = normalize_text(line)
-            for candidate in sections:
-                normalized_candidate = normalize_text(candidate)
-                if normalized_candidate and (
-                    normalized_line == normalized_candidate
-                    or normalized_candidate in normalized_line
-                ) and len(candidate) > len(best):
-                    best = candidate
-        section = best
 
     numbers: list[int] = []
     sources: list[str] = []
@@ -271,10 +253,7 @@ def interpret_ocr_text(
     binding = labeled.get("binding", [""])[0]
 
     candidates = [
-        line
-        for line in content_lines
-        if not _NUMBER_LIST_LINE.fullmatch(line)
-        and (not section or normalize_text(line) != normalize_text(section))
+        line for line in content_lines if not _NUMBER_LIST_LINE.fullmatch(line)
     ]
     if not imprint:
         imprint = next((line for line in candidates if _looks_imprint(line)), "")
@@ -320,7 +299,6 @@ def interpret_ocr_text(
         warnings.append("No reconocí un autor claro.")
 
     return {
-        "section": section,
         "title": title,
         "author": author,
         "imprint": imprint,
@@ -352,9 +330,7 @@ def _split_record_rows(text: str) -> list[list[str]]:
     return rows
 
 
-def interpret_ocr_records_text(
-    text: str, known_sections: list[str] | None = None
-) -> list[dict[str, object]]:
+def interpret_ocr_records_text(text: str) -> list[dict[str, object]]:
     """Convierte el texto OCR de una planilla en varias propuestas de registro.
 
     Espera una línea por libro con los campos separados por '|' en el orden
@@ -364,7 +340,7 @@ def interpret_ocr_records_text(
 
     rows = _split_record_rows(text)
     if not rows:
-        return [interpret_ocr_text(text, known_sections)]
+        return [interpret_ocr_text(text)]
 
     records: list[dict[str, object]] = []
     for inventory_text, author, title, binding, imprint in rows:
@@ -379,7 +355,6 @@ def interpret_ocr_records_text(
             warnings.append("Sin autor.")
         records.append(
             {
-                "section": "",
                 "title": title,
                 "author": author,
                 "imprint": imprint,
@@ -658,10 +633,7 @@ def _clean_model_text(text: str) -> str:
     return cleaned.strip()
 
 
-def _scan_with_deepseek(
-    data: bytes,
-    known_sections: list[str] | None = None,
-) -> dict[str, object]:
+def _scan_with_deepseek(data: bytes) -> dict[str, object]:
     """Transcribe la ficha con un modelo de visión de DeepSeek (API OpenAI-compatible)."""
 
     api_key = _deepseek_api_key()
@@ -725,7 +697,7 @@ def _scan_with_deepseek(
     except (KeyError, IndexError, TypeError, ValueError) as error:
         raise OcrError("La respuesta de DeepSeek no tuvo el formato esperado.") from error
 
-    records = interpret_ocr_records_text(raw_text, known_sections)
+    records = interpret_ocr_records_text(raw_text)
     confidence = 100.0 if raw_text else 0.0
     logger.info(
         "OCR DeepSeek (%s): %d línea(s), %d registro(s) reconocido(s).",
@@ -753,21 +725,15 @@ def _scan_with_deepseek(
     }
 
 
-def scan_image_bytes(
-    data: bytes,
-    known_sections: list[str] | None = None,
-) -> dict[str, object]:
+def scan_image_bytes(data: bytes) -> dict[str, object]:
     """Lee una imagen escaneada y devuelve una propuesta de campos."""
 
     if selected_engine() == "deepseek":
-        return _scan_with_deepseek(data, known_sections)
-    return _scan_with_trocr(data, known_sections)
+        return _scan_with_deepseek(data)
+    return _scan_with_trocr(data)
 
 
-def _scan_with_trocr(
-    data: bytes,
-    known_sections: list[str] | None = None,
-) -> dict[str, object]:
+def _scan_with_trocr(data: bytes) -> dict[str, object]:
     """Lee una imagen escaneada con TrOCR y devuelve una propuesta de campos."""
 
     processor, model = _get_model()
@@ -808,7 +774,7 @@ def _scan_with_trocr(
 
     raw_text = "\n".join(lines)
     confidence = sum(confidences) / len(confidences) if confidences else 0.0
-    result = interpret_ocr_text(raw_text, known_sections)
+    result = interpret_ocr_text(raw_text)
     width, height = best_oriented.size
     logger.info(
         "OCR: %d segmento(s), %d línea(s), confianza media %.1f%%",

@@ -9,7 +9,6 @@ from app.main import create_app
 RECORDS = [
     {
         "inventory_numbers": [62, 63],
-        "section": "Educación",
         "title": "Matemática 6",
         "author": "María López",
         "imprint": "Buenos Aires: Estrada, 2010",
@@ -18,7 +17,6 @@ RECORDS = [
     },
     {
         "inventory_numbers": [200],
-        "section": "Literatura",
         "title": "El Principito",
         "author": "Antoine de Saint-Exupéry",
         "imprint": "",
@@ -39,14 +37,14 @@ def test_summary_counts_records_and_copies() -> None:
 
     assert "2 registros" in summary
     assert "3 ejemplares" in summary
-    assert "Educación: 1 registros, 2 ejemplares." in summary
+    assert "INV-000062 a INV-000200" in summary
 
 
 def test_format_record_compacts_inventory_numbers() -> None:
     line = chatbot.format_record(RECORDS[0])
 
-    assert line.startswith("INV-000062–INV-000063 | Educación")
-    assert "«Matemática 6»" in line
+    assert line.startswith("INV-000062–INV-000063 | «Matemática 6»")
+    assert "María López" in line
 
 
 def test_select_relevant_records_matches_title() -> None:
@@ -156,7 +154,6 @@ def test_chat_answers_using_inventory_context(monkeypatch, tmp_path) -> None:
         client.post(
             "/api/books",
             json={
-                "section": "Educación",
                 "title": "Matemática 6",
                 "author": "María López",
                 "inventory_numbers": [62, 63],

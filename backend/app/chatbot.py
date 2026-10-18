@@ -1,7 +1,7 @@
 """Asistente del catálogo: responde preguntas sobre el inventario con DeepSeek.
 
-El contexto se arma con los registros activos de la base (sección, título,
-autor, pie de imprenta, encuadernación y números de inventario). El modelo de
+El contexto se arma con los registros activos de la base (título, autor, pie de
+imprenta, encuadernación y números de inventario). El modelo de
 chat **más económico** de DeepSeek responde usando **solo** esos datos: si el
 libro no está en el catálogo, o la pregunta no se entiende, lo dice en lugar de
 inventar una respuesta.
@@ -36,7 +36,9 @@ def _setting(name: str, default: str = "") -> str:
 
 
 # `deepseek-chat` es el modelo de chat más económico de la API (sin cadena de
-# razonamiento). Se puede cambiar con DEEPSEEK_CHAT_MODEL si hace falta.
+# razonamiento). Se puede cambiar con CHATBOT_MODEL (o DEEPSEEK_CHAT_MODEL); con
+# CHATBOT_API_KEY/CHATBOT_BASE_URL se puede apuntar a cualquier proveedor
+# OpenAI-compatible (p. ej. un modelo gratuito).
 DEFAULT_CHAT_MODEL = "deepseek-chat"
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 MAX_CONTEXT_CHARS = 48_000
@@ -57,19 +59,18 @@ _SYSTEM_PROMPT = (
     "(préstamos, asociación, sanciones, horarios, computadoras, criterios internos).\n"
     "2) INVENTARIO: el catálogo en vivo de libros y ejemplares.\n"
     "Reglas obligatorias:\n"
-    "- No inventes políticas, títulos, autores, secciones ni números de inventario.\n"
+    "- No inventes políticas, títulos, autores ni números de inventario.\n"
     "- Para saber si existe un libro o cuántos ejemplares hay, usá el INVENTARIO; si no "
-    "aparece, respondé que no lo encontraste y sugerí revisar el título, el autor o la "
-    "sección.\n"
+    "aparece, respondé que no lo encontraste y sugerí revisar el título o el autor.\n"
     "- Para trámites y servicios (asociarse, préstamos, sanciones, horarios, netbooks, "
     "material especial) usá el CONOCIMIENTO INSTITUCIONAL.\n"
     "- Si la pregunta no está cubierta por ninguna de las dos fuentes, o es confusa, "
     "decí que no lo sabés y pedí que la reformulen; no adivines.\n"
     "- Si el conocimiento institucional y el inventario se contradicen sobre la "
     "disponibilidad de un libro, priorizá el inventario (es el estado actual).\n"
-    "- Cada ficha del inventario tiene el formato: números | sección | título | autor | "
-    "pie de imprenta | encuadernación. Un rango como 62-71 son ejemplares del mismo "
-    "registro; los números se muestran como INV-000062.\n"
+    "- Cada ficha del inventario tiene el formato: números | título | autor | pie de "
+    "imprenta | encuadernación. Un rango como 62-71 son ejemplares del mismo registro; "
+    "los números se muestran como INV-000062.\n"
     "- Del ejemplar solo se conoce la encuadernación u observaciones: no inventes estado "
     "físico, préstamos ni disponibilidad.\n"
     "- Si te piden totales, usá el resumen del inventario que se incluye."
@@ -133,22 +134,17 @@ def _range_label(start: int, end: int) -> str:
 
 def build_inventory_summary(records: list[dict[str, object]]) -> str:
     total_copies = sum(len(record.get("inventory_numbers") or []) for record in records)
-    sections: dict[str, dict[str, int]] = {}
-    for record in records:
-        section = str(record.get("section") or "Sin sección").strip() or "Sin sección"
-        stats = sections.setdefault(section, {"records": 0, "copies": 0})
-        stats["records"] += 1
-        stats["copies"] += len(record.get("inventory_numbers") or [])
-
+    numbers = [
+        number for record in records for number in (record.get("inventory_numbers") or [])
+    ]
     lines = [
         f"Total: {len(records)} registros bibliográficos y {total_copies} ejemplares numerados.",
     ]
-    if sections:
-        lines.append("Secciones:")
-        for section, stats in sorted(sections.items(), key=lambda item: item[0].lower()):
-            lines.append(
-                f"- {section}: {stats['records']} registros, {stats['copies']} ejemplares."
-            )
+    if numbers:
+        lines.append(
+            "Rango de inventario: "
+            f"{format_inventory_number(min(numbers))} a {format_inventory_number(max(numbers))}."
+        )
     return "\n".join(lines)
 
 
@@ -157,7 +153,6 @@ def format_record(record: dict[str, object]) -> str:
     return " | ".join(
         (
             numbers,
-            str(record.get("section") or "—"),
             f"«{record.get('title') or '—'}»",
             str(record.get("author") or "—"),
             str(record.get("imprint") or "—"),
@@ -178,7 +173,6 @@ def _question_tokens(question: str) -> list[str]:
 
 def _record_haystack(record: dict[str, object]) -> str:
     parts = [
-        str(record.get("section") or ""),
         str(record.get("title") or ""),
         str(record.get("author") or ""),
         str(record.get("imprint") or ""),
@@ -249,15 +243,16 @@ def _sanitize_history(history) -> list[dict[str, str]]:
 
 
 def _api_key() -> str:
-    return _setting("DEEPSEEK_API_KEY")
+    return _setting("CHATBOT_API_KEY") or _setting("DEEPSEEK_API_KEY")
 
 
 def _base_url() -> str:
-    return _setting("DEEPSEEK_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+    base = _setting("CHATBOT_BASE_URL") or _setting("DEEPSEEK_BASE_URL", DEFAULT_BASE_URL)
+    return base.rstrip("/")
 
 
 def _chat_model() -> str:
-    return _setting("DEEPSEEK_CHAT_MODEL", DEFAULT_CHAT_MODEL)
+    return _setting("CHATBOT_MODEL") or _setting("DEEPSEEK_CHAT_MODEL", DEFAULT_CHAT_MODEL)
 
 
 def context_directory() -> Path:
@@ -317,7 +312,7 @@ def chatbot_status() -> dict[str, object]:
         "context_files": context_files,
         "detail": None
         if available
-        else "Falta DEEPSEEK_API_KEY. Configurá la clave en el archivo .env.",
+        else "Falta CHATBOT_API_KEY (o DEEPSEEK_API_KEY). Configurá la clave en .env.",
     }
 
 
@@ -335,7 +330,8 @@ def answer_question(
     api_key = _api_key()
     if not api_key:
         raise ChatbotUnavailable(
-            "Falta la clave de DeepSeek. Configurá DEEPSEEK_API_KEY en el archivo .env."
+            "Falta la clave del asistente. Configurá CHATBOT_API_KEY "
+            "(o DEEPSEEK_API_KEY) en el archivo .env."
         )
 
     summary, catalog, included, truncated = build_catalog_context(records, message)
@@ -347,7 +343,7 @@ def answer_question(
     )
     user_content = (
         f"Resumen del inventario:\n{summary}\n\n"
-        f"Fichas del catálogo (números | sección | título | autor | pie de imprenta | encuadernación):\n"
+        f"Fichas del catálogo (números | título | autor | pie de imprenta | encuadernación):\n"
         f"{catalog}{note}\n\n"
         f"Pregunta: {message}"
     )
@@ -393,29 +389,29 @@ def answer_question(
             timeout=timeout,
         )
     except Exception as error:  # noqa: BLE001 - red/DNS/timeout
-        raise ChatbotError(f"No pude contactar la API de DeepSeek: {error}") from error
+        raise ChatbotError(f"No pude contactar la API del asistente: {error}") from error
 
     if response.status_code >= 400:
         detail = response.text.strip()[:500]
         if response.status_code in (401, 402, 403):
             raise ChatbotUnavailable(
-                f"La API de DeepSeek rechazó la clave o el saldo: {detail}"
+                f"El proveedor del asistente rechazó la clave o el saldo: {detail}"
             )
         raise ChatbotError(
-            f"La API de DeepSeek respondió con el estado {response.status_code}: {detail}"
+            f"La API del asistente respondió con el estado {response.status_code}: {detail}"
         )
 
     try:
         body = response.json()
         reply = str(body["choices"][0]["message"]["content"]).strip()
     except (KeyError, IndexError, TypeError, ValueError) as error:
-        raise ChatbotError("La respuesta de DeepSeek no tuvo el formato esperado.") from error
+        raise ChatbotError("La respuesta del asistente no tuvo el formato esperado.") from error
 
     if not reply:
         raise ChatbotError("El modelo no devolvió una respuesta.")
 
     logger.info(
-        "ChatBot DeepSeek (%s): %d fichas y %d archivo(s) de contexto institucional.",
+        "ChatBot (%s): %d fichas y %d archivo(s) de contexto institucional.",
         model,
         included,
         context_files,
