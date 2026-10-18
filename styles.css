@@ -339,3 +339,28 @@ html[data-theme="dark"] .ocr-preview img { border-color: #39443d; background: #1
 html[data-theme="dark"] .ocr-note { color: #b3c0b3; }
 html[data-theme="dark"] .ocr-loader-hint { color: #98a398; }
 @media (max-width: 540px) { .ocr-preview { grid-template-columns: 1fr; justify-items: center; text-align: center; } }
+
+.scan-dialog { width: min(1080px, calc(100% - 32px)); }
+.scan-body { padding: 25px; }
+.scan-section { max-width: 340px; margin-bottom: 15px; }
+.scan-list { display: grid; gap: 8px; max-height: 52vh; padding: 2px; overflow-y: auto; }
+.scan-row { display: grid; grid-template-columns: 104px 1fr 1.5fr 128px 1.5fr 30px; gap: 8px; align-items: end; padding: 10px; border: 1px solid #ecece9; border-radius: 9px; background: #fbfcfa; }
+.scan-cell { display: grid; gap: 5px; min-width: 0; color: #83887f; font-size: 9px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase; }
+.scan-cell input { width: 100%; min-height: 34px; padding: 7px 9px; border: 1px solid #e6e9e3; border-radius: 6px; outline: 0; background: #fff; color: #343831; font-size: 11px; font-weight: 400; }
+.scan-cell input::placeholder { color: #a4a79f; }
+.scan-cell input:focus { border-color: #83a085; box-shadow: 0 0 0 3px #edf3ed; }
+.scan-remove { align-self: end; width: 30px; height: 34px; color: #b14f48; font-size: 20px; }
+.scan-remove:hover { background: #fbeae7; color: #a4453d; }
+html[data-theme="dark"] .scan-row { border-color: #303834; background: #1b211d; }
+html[data-theme="dark"] .scan-cell { color: #929d94; }
+html[data-theme="dark"] .scan-cell input { border-color: #3c4740; background: #191f1b; color: #e3e8e2; }
+html[data-theme="dark"] .scan-cell input::placeholder { color: #79857b; }
+html[data-theme="dark"] .scan-cell input:focus { border-color: #719476; box-shadow: 0 0 0 3px #344837; }
+html[data-theme="dark"] .scan-remove { color: #eaa79f; }
+html[data-theme="dark"] .scan-remove:hover { background: #3a2825; color: #f0b3ab; }
+@media (max-width: 760px) {
+  .scan-row { grid-template-columns: 1fr 1fr; }
+  .scan-cell-wide { grid-column: 1 / -1; }
+  .scan-remove { grid-column: 2; justify-self: end; }
+}
+@media (max-width: 540px) { .scan-body { padding: 20px 17px; } .scan-row { grid-template-columns: 1fr; } .scan-remove { grid-column: 1; } }

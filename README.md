@@ -30,6 +30,7 @@ MySQL solo es accesible desde la red interna de Docker; no se publica un puerto 
 | `GET` | `/api/health` | Comprueba la conexión a MySQL. |
 | `GET` | `/api/books` | Lista los registros y sus números de inventario individuales. |
 | `POST` | `/api/books` | Crea un registro y sus ejemplares. |
+| `POST` | `/api/books/bulk` | Crea varios registros a la vez de forma atómica (un escaneo con varias fichas). |
 | `PUT` | `/api/books/{id}` | Actualiza un registro y su rango de ejemplares. |
 | `DELETE` | `/api/books/{id}` | Mueve el registro y sus ejemplares a la papelera. |
 | `DELETE` | `/api/books` | Mueve **todos** los registros a la papelera. |
@@ -39,23 +40,25 @@ MySQL solo es accesible desde la red interna de Docker; no se publica un puerto 
 | `DELETE` | `/api/trash` | Vacía la papelera (borrado definitivo). |
 | `POST` | `/api/import?mode=replace` | Valida y reemplaza el catálogo a partir de un CSV; requiere confirmación si la base ya tiene registros. |
 | `GET` | `/api/ocr/status` | Informa el motor OCR activo (DeepSeek o TrOCR), si está disponible y qué formatos admite. |
-| `POST` | `/api/ocr/scan` | Lee una imagen escaneada y devuelve una propuesta de campos; no persiste nada. |
+| `POST` | `/api/ocr/scan` | Lee una imagen escaneada y devuelve una o más propuestas de registro; no persiste nada. |
 
 La interfaz abre en tema oscuro. El botón de sol/luna permite cambiar al tema claro; la selección se guarda aparte de los datos del catálogo.
 
 ## Lectura de imágenes escaneadas (OCR)
 
-Para digitalizar fichas escaneadas sin transcribirlas a mano, el panel usa por defecto un **modelo de visión de DeepSeek** (`deepseek-flash`) a través de su API compatible con OpenAI. El modelo transcribe la ficha completa y el resultado se interpreta como una propuesta de campos. Como respaldo local se mantiene [TrOCR](https://huggingface.co/microsoft/trocr-base-handwritten) (`microsoft/trocr-base-handwritten`), que lee **escritura manuscrita e impresa** segmentando la imagen en renglones.
+Para digitalizar fichas escaneadas sin transcribirlas a mano, el panel usa por defecto un **modelo de visión de DeepSeek** (`deepseek-flash`) a través de su API compatible con OpenAI. El modelo transcribe la imagen completa y el resultado se interpreta como propuestas de registro. Como respaldo local se mantiene [TrOCR](https://huggingface.co/microsoft/trocr-base-handwritten) (`microsoft/trocr-base-handwritten`), que lee **escritura manuscrita e impresa** segmentando la imagen en renglones.
 
 1. Elegí **Leer imagen (OCR)** en la barra del panel, o **Cargar imagen** dentro del formulario de registro, y seleccioná una foto o escaneo (PNG, JPG, TIFF, BMP, WEBP, GIF, y HEIC/AVIF para fotos de celular; hasta 20 MB).
-2. La API reencoda la imagen a JPEG y la envía al modelo de visión de DeepSeek con una consigna que devuelve una línea por campo (Ninv, Título, Autor, Sección, Pie de imprenta, Encuadernación).
-3. El texto reconocido se combina en una propuesta de campos.
-4. El formulario **Agregar registro** se abre con los campos reconocidos y la imagen de referencia: número de inventario, sección, título, autor, pie de imprenta y encuadernación.
-5. Revisá y corregí los campos, y guardá el registro. **El OCR nunca escribe en la base por su cuenta**: solo propone valores.
+2. La API reencoda la imagen a JPEG y la envía al modelo de visión de DeepSeek con una consigna que devuelve **una línea por libro**, con los campos `Nº de inventario | Autor | Título | Encuadernación | Pie de imprenta`.
+3. El texto reconocido se divide en una propuesta por cada fila.
+4. Según cuántas fichas haya:
+   - **Una sola ficha:** se abre el formulario **Agregar registro** con los campos reconocidos y la imagen de referencia.
+   - **Varias fichas (multiregistro):** se abre el panel **Registros detectados**, con la imagen y una fila editable por cada libro; elegís una **sección para todos**, corregís lo que haga falta y guardás todo junto con `POST /api/books/bulk`.
+5. Revisá y corregí los campos, y guardá. **El OCR nunca escribe en la base por su cuenta**: solo propone valores.
 
-Si la ficha tiene varios números de inventario (un rango como `62-72` o una lista como `62, 65, 78`), el formulario los carga **todos**; el campo acepta números sueltos separados por comas y rangos. Un mismo registro bibliográfico puede tener muchos ejemplares.
+Si una ficha tiene varios números de inventario (un rango como `62-72` o una lista como `62, 65, 78`), el formulario los carga **todos**; el campo acepta números sueltos separados por comas y rangos. Un mismo registro bibliográfico puede tener muchos ejemplares.
 
-La respuesta de `/api/ocr/scan` incluye `engine` (`deepseek` o `trocr`), `confidence`, `raw_text` y `warnings` (por ejemplo, si no reconoció números de inventario, si no encontró título/autor o si la confianza es baja). Las secciones conocidas del catálogo se envían a la API para mejorar la detección del campo `Sección`.
+La respuesta de `/api/ocr/scan` incluye `records` (lista de propuestas), `engine` (`deepseek` o `trocr`), `confidence`, `raw_text` y `warnings` (por ejemplo, si no reconoció números de inventario, si no encontró título/autor o si la confianza es baja). Las secciones conocidas del catálogo se envían a la API para mejorar la detección del campo `Sección`.
 
 Configuración en `.env`:
 
@@ -156,6 +159,8 @@ docker compose up --build
 | Se confirma una importación mientras ya hay registros cargados | Se reemplaza el catálogo completo de MySQL en una transacción; no se mezclan filas ni se hace una actualización por título. | Exportá una copia antes si necesitás conservar el estado anterior. |
 | Se cancela la confirmación | No se cambia el catálogo. | No hace falta restaurar datos. |
 | Se edita el rango de un registro | Se reemplaza su conjunto de números; la validación impide conflictos con otros registros. | Una edición incorrecta podría liberar números que estaban asignados a ese registro. |
+| La imagen escaneada contiene varias fichas (multiregistro) | El OCR devuelve una propuesta por fila y el panel abre **Registros detectados**; al confirmar se guardan juntas con `POST /api/books/bulk` (transacción atómica). | Corregí cada fila y elegí la sección; si hay números repetidos entre filas o ya asignados, se rechaza todo el lote. |
+| Se escanea una imagen con un formato distinto al esperado | Si no hay filas con separadores `\|`, el intérprete cae al modo de un solo registro. | Revisá la propuesta; si vino mal, cargá los campos a mano o mejorá la toma. |
 | Se elimina un registro | Se mueve a la papelera; deja de contar en el catálogo. | Se puede restaurar o borrar definitivamente desde **Papelera**. |
 | Se exporta con búsqueda o filtro activo | Solo se exportan las filas visibles. | Quitá filtros para obtener el inventario completo. |
 | Se abre el panel en otro navegador o dispositivo | La colección aparece desde MySQL mientras se pueda conectar a la PC/servidor que aloja la API. | La base de esta configuración solo publica los puertos en `127.0.0.1`; no es accesible desde otros dispositivos de la red. |

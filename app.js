@@ -30,6 +30,16 @@ const elements = {
   trashEmpty: document.querySelector("#trash-empty"),
   trashCount: document.querySelector("#trash-count"),
   emptyTrashButton: document.querySelector("#empty-trash-button"),
+  scanDialog: document.querySelector("#scan-dialog"),
+  scanList: document.querySelector("#scan-list"),
+  scanSection: document.querySelector("#scan-section"),
+  scanError: document.querySelector("#scan-error"),
+  scanSaveButton: document.querySelector("#scan-save-button"),
+  scanAlert: document.querySelector("#scan-alert"),
+  scanAlertMessage: document.querySelector("#scan-alert-message"),
+  scanPreview: document.querySelector("#scan-preview"),
+  scanImage: document.querySelector("#scan-image"),
+  scanNote: document.querySelector("#scan-note"),
 };
 
 let books = [];
@@ -37,6 +47,8 @@ let trash = [];
 let editingId = null;
 let toastTimeout;
 let ocrImageUrl = null;
+let scanImageUrl = null;
+let scanRecords = [];
 
 function applyTheme(theme) {
   const selectedTheme = theme === "light" ? "light" : "dark";
@@ -328,18 +340,25 @@ function fillFormFromOcr(result) {
 }
 
 function showOcrSuggestion(result, imageUrl) {
+  const records = Array.isArray(result.records) ? result.records : [];
+  if (records.length > 1) {
+    openScanRecords(result, imageUrl, records);
+    return;
+  }
+  const single = records[0] || result;
   if (elements.dialog.open) {
     resetOcrPreview();
     elements.formError.hidden = true;
   } else {
     openDialog();
   }
-  fillFormFromOcr(result);
+  fillFormFromOcr(single);
   ocrImageUrl = imageUrl;
   elements.ocrImage.src = imageUrl;
   elements.ocrPreview.hidden = false;
-  const summary = result.inventory_numbers.length
-    ? `Reconocí ${result.inventory_numbers.length} número(s) de inventario.`
+  const numbers = single.inventory_numbers || [];
+  const summary = numbers.length
+    ? `Reconocí ${numbers.length} número(s) de inventario.`
     : "No reconocí números de inventario; completalos a mano.";
   const motor = result.engine ? ` Motor: ${result.engine}.` : "";
   elements.ocrNote.textContent = `${summary} Confianza de lectura: ${result.confidence}%.${motor}`;
@@ -350,6 +369,155 @@ function showOcrSuggestion(result, imageUrl) {
     hideOcrAlert();
   }
   elements.form.elements.title.focus();
+}
+
+function resetScanPreview() {
+  if (scanImageUrl) {
+    URL.revokeObjectURL(scanImageUrl);
+    scanImageUrl = null;
+  }
+  if (elements.scanPreview) elements.scanPreview.hidden = true;
+  if (elements.scanImage) elements.scanImage.removeAttribute("src");
+  if (elements.scanNote) elements.scanNote.textContent = "";
+}
+
+function hideScanAlert() {
+  if (!elements.scanAlert) return;
+  elements.scanAlert.hidden = true;
+  elements.scanAlertMessage.textContent = "";
+}
+
+function showScanAlert(message, kind = "warn") {
+  if (!elements.scanAlert) return;
+  elements.scanAlertMessage.textContent = message;
+  elements.scanAlert.classList.toggle("ocr-alert-error", kind === "error");
+  elements.scanAlert.classList.toggle("ocr-alert-warn", kind === "warn");
+  elements.scanAlert.classList.toggle("ocr-alert-ok", kind === "ok");
+  elements.scanAlert.hidden = false;
+}
+
+function scanRowTemplate(record, index) {
+  const field = (name, label, wide = false) => `<label class="scan-cell${wide ? " scan-cell-wide" : ""}"><span>${label}</span><input data-field="${name}" value="${escapeHTML(record[name])}" /></label>`;
+  return `<div class="scan-row" data-index="${index}">
+    ${field("inventory", "N° inv.")}
+    ${field("author", "Autor")}
+    ${field("title", "Título", true)}
+    ${field("binding", "Encuadernación")}
+    ${field("imprint", "Pie de imprenta", true)}
+    <button class="icon-button scan-remove" type="button" data-remove="${index}" aria-label="Quitar fila ${index + 1}">×</button>
+  </div>`;
+}
+
+function renderScanRecords() {
+  elements.scanList.innerHTML = scanRecords.map(scanRowTemplate).join("");
+}
+
+function openScanRecords(result, imageUrl, records) {
+  if (elements.dialog.open) elements.dialog.close();
+  scanRecords = records.map((record) => ({
+    inventory: record.inventory_source || compressNumbers(record.inventory_numbers || []),
+    author: record.author || "",
+    title: record.title || "",
+    binding: record.binding || "",
+    imprint: record.imprint || "",
+  }));
+  resetScanPreview();
+  hideScanAlert();
+  elements.scanError.hidden = true;
+  scanImageUrl = imageUrl;
+  elements.scanImage.src = imageUrl;
+  elements.scanPreview.hidden = false;
+  const motor = result.engine ? ` Motor: ${result.engine}.` : "";
+  elements.scanNote.textContent = `Reconocí ${scanRecords.length} registros. Confianza de lectura: ${result.confidence}%.${motor}`;
+  const warnings = result.warnings || [];
+  const incomplete = records.filter((record) => (record.warnings || []).length > 0).length;
+  if (warnings.length) {
+    showScanAlert(`Revisá antes de guardar: ${warnings.join(" ")}`);
+  } else if (incomplete) {
+    showScanAlert(`${incomplete} fila(s) tienen datos incompletos; completá lo que falte.`);
+  } else {
+    hideScanAlert();
+  }
+  elements.scanSection.value = elements.categoryFilter.value || "";
+  renderScanRecords();
+  elements.scanDialog.showModal();
+  elements.scanSection.focus();
+}
+
+async function saveScanRecords() {
+  const section = elements.scanSection.value.trim();
+  elements.scanError.hidden = true;
+  if (!section) {
+    elements.scanError.textContent = "Elegí la sección que se aplicará a todos los registros.";
+    elements.scanError.hidden = false;
+    return;
+  }
+  const rows = [...elements.scanList.querySelectorAll(".scan-row")];
+  if (!rows.length) {
+    elements.scanError.textContent = "No quedan filas para guardar.";
+    elements.scanError.hidden = false;
+    return;
+  }
+  const payload = [];
+  const problems = [];
+  rows.forEach((row, index) => {
+    const value = (field) => row.querySelector(`[data-field="${field}"]`).value.trim();
+    const title = value("title");
+    const author = value("author");
+    let numbers;
+    try {
+      numbers = parseInventoryRange(value("inventory"));
+    } catch (error) {
+      problems.push(`Fila ${index + 1}: ${error.message}`);
+      return;
+    }
+    if (!title || !author) {
+      problems.push(`Fila ${index + 1}: completá el título y el autor.`);
+      return;
+    }
+    payload.push({
+      section,
+      title,
+      author,
+      imprint: value("imprint"),
+      binding: value("binding"),
+      inventory_numbers: numbers,
+      inventory_source: compressNumbers(numbers),
+    });
+  });
+  if (problems.length) {
+    elements.scanError.innerHTML = problems.map((message) => escapeHTML(message)).join("<br />");
+    elements.scanError.hidden = false;
+    return;
+  }
+  const seen = new Set();
+  const duplicates = new Set();
+  payload.forEach((item) => item.inventory_numbers.forEach((number) => {
+    if (seen.has(number)) duplicates.add(number);
+    seen.add(number);
+  }));
+  if (duplicates.size) {
+    elements.scanError.textContent = `Números de inventario repetidos entre las filas: ${[...duplicates].join(", ")}.`;
+    elements.scanError.hidden = false;
+    return;
+  }
+  elements.scanSaveButton.disabled = true;
+  try {
+    const result = await apiRequest("/api/books/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    elements.scanDialog.close();
+    const loaded = await refreshBooks();
+    if (!loaded) return;
+    showToast(`Se guardaron ${result.records} registros y ${result.copies} números de inventario.`);
+  } catch (error) {
+    elements.scanError.textContent = error.message;
+    elements.scanError.hidden = false;
+  } finally {
+    elements.scanSaveButton.disabled = false;
+  }
 }
 
 function compressNumbers(numbers) {
@@ -724,6 +892,19 @@ elements.trashList?.addEventListener("click", (event) => {
 document.querySelector("#import-button").addEventListener("click", () => elements.csvInput.click());
 elements.themeToggle.addEventListener("click", toggleTheme);
 elements.dialog.addEventListener("close", resetOcrPreview);
+document.querySelector(".close-scan")?.addEventListener("click", () => elements.scanDialog.close());
+document.querySelector("#scan-cancel-button")?.addEventListener("click", () => elements.scanDialog.close());
+elements.scanSaveButton?.addEventListener("click", saveScanRecords);
+elements.scanDialog?.addEventListener("close", resetScanPreview);
+elements.scanList?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-remove]");
+  if (!button) return;
+  button.closest(".scan-row")?.remove();
+  if (!elements.scanList.querySelector(".scan-row")) {
+    elements.scanError.textContent = "No quedan filas para guardar. Cerrá el panel para continuar.";
+    elements.scanError.hidden = false;
+  }
+});
 elements.csvInput.addEventListener("change", () => {
   const [file] = elements.csvInput.files;
   if (file) handleCsvFile(file);

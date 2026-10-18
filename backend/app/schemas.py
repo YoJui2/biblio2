@@ -58,6 +58,11 @@ class ImportResult(BaseModel):
     sections: int
 
 
+class BulkCreateResult(BaseModel):
+    records: int
+    copies: int
+
+
 class DeleteAllResult(BaseModel):
     deleted_records: int
     deleted_copies: int
@@ -85,4 +90,26 @@ class OCRResult(BaseModel):
     binding: str = ""
     inventory_numbers: list[int] = Field(default_factory=list)
     inventory_source: str = ""
+    warnings: list[str] = Field(default_factory=list)
+
+
+class OCRRecord(BaseModel):
+    section: str = ""
+    title: str = ""
+    author: str = ""
+    imprint: str = ""
+    binding: str = ""
+    inventory_numbers: list[int] = Field(default_factory=list)
+    inventory_source: str = ""
+    warnings: list[str] = Field(default_factory=list)
+
+
+class OCRScanResult(BaseModel):
+    status: str
+    engine: str = "deepseek"
+    confidence: float
+    raw_text: str
+    width: int
+    height: int
+    records: list[OCRRecord] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

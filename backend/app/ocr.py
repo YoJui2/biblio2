@@ -65,16 +65,16 @@ _DEEPSEEK_SYSTEM_PROMPT = (
     "acentos y números de inventario, sin inventar ni resumir nada."
 )
 _DEEPSEEK_USER_PROMPT = (
-    "Transcribí la ficha. Devolvé una línea por campo con este formato exacto y sin "
-    "comentarios ni bloques de código:\n"
-    "Ninv: <todos los números de inventario; si hay varios, separalos por comas>\n"
-    "Título: <título de la obra>\n"
-    "Autor: <autor, si aparece>\n"
-    "Sección: <sección o colección>\n"
-    "Pie de imprenta: <ciudad, editorial y año, si aparecen>\n"
-    "Encuadernación: <encuadernación u observaciones>\n"
-    "Si un campo no aparece en la imagen, dejalo vacío después de los dos puntos. "
-    "No omitas ningún número de inventario, aunque aparezca en varias líneas o columnas."
+    "La imagen es una planilla de inventario de biblioteca con una fila por libro. "
+    "Transcribí TODAS las filas, sin omitir ninguna y sin inventar datos.\n"
+    "Devolvé una línea por libro, sin encabezados, sin numeración de fila y sin bloques "
+    "de código, con los campos en este orden separados por \" | \":\n"
+    "Nº de inventario | Autor | Título | Encuadernación | Pie de imprenta\n"
+    "Reglas:\n"
+    "- En el primer campo poné TODOS los números de inventario de esa fila, separados por comas.\n"
+    "- Respetá mayúsculas, acentos y números; no resumas ni traduzcas.\n"
+    "- Si un dato no aparece, dejá el campo vacío pero conservá los separadores \" | \".\n"
+    "- No agregues comentarios, aclaraciones ni líneas de resumen."
 )
 
 _MODEL_LOCK = threading.Lock()
@@ -329,6 +329,67 @@ def interpret_ocr_text(
         "inventory_source": inventory_source,
         "warnings": warnings,
     }
+
+
+_RECORD_LINE_PREFIX = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
+
+
+def _split_record_rows(text: str) -> list[list[str]]:
+    """Divide el texto del modelo en filas de campos separadas por '|'."""
+
+    rows: list[list[str]] = []
+    for raw_line in re.split(r"[\r\n]+", text or ""):
+        line = _RECORD_LINE_PREFIX.sub("", raw_line.strip()).strip()
+        line = line.strip("`").strip()
+        if not line or "|" not in line:
+            continue
+        parts = [part.strip() for part in line.split("|")]
+        if all(not part for part in parts):
+            continue
+        while len(parts) < 5:
+            parts.append("")
+        rows.append(parts[:5])
+    return rows
+
+
+def interpret_ocr_records_text(
+    text: str, known_sections: list[str] | None = None
+) -> list[dict[str, object]]:
+    """Convierte el texto OCR de una planilla en varias propuestas de registro.
+
+    Espera una línea por libro con los campos separados por '|' en el orden
+    inventario, autor, título, encuadernación y pie de imprenta. Si no encuentra
+    filas con ese formato, cae al intérprete de un solo registro.
+    """
+
+    rows = _split_record_rows(text)
+    if not rows:
+        return [interpret_ocr_text(text, known_sections)]
+
+    records: list[dict[str, object]] = []
+    for inventory_text, author, title, binding, imprint in rows:
+        numbers, _ = _parse_inventory_value(inventory_text)
+        numbers = sorted(set(numbers))
+        warnings: list[str] = []
+        if not numbers:
+            warnings.append("Sin números de inventario.")
+        if not title:
+            warnings.append("Sin título.")
+        if not author:
+            warnings.append("Sin autor.")
+        records.append(
+            {
+                "section": "",
+                "title": title,
+                "author": author,
+                "imprint": imprint,
+                "binding": binding,
+                "inventory_numbers": numbers,
+                "inventory_source": _compact_inventory_numbers(numbers),
+                "warnings": warnings,
+            }
+        )
+    return records
 
 
 def _get_model():
@@ -664,27 +725,30 @@ def _scan_with_deepseek(
     except (KeyError, IndexError, TypeError, ValueError) as error:
         raise OcrError("La respuesta de DeepSeek no tuvo el formato esperado.") from error
 
-    result = interpret_ocr_text(raw_text, known_sections)
+    records = interpret_ocr_records_text(raw_text, known_sections)
     confidence = 100.0 if raw_text else 0.0
     logger.info(
-        "OCR DeepSeek (%s): %d línea(s) reconocida(s).",
+        "OCR DeepSeek (%s): %d línea(s), %d registro(s) reconocido(s).",
         model,
         len(raw_text.splitlines()),
+        len(records),
     )
 
     low_confidence = not raw_text
-    warnings = list(result["warnings"])
+    warnings: list[str] = []
     if low_confidence:
         warnings.insert(0, "El modelo de DeepSeek no devolvió texto para esta imagen.")
+    if not records:
+        warnings.append("No reconocí ninguna fila con el formato esperado.")
 
     return {
-        **result,
         "status": "low_confidence" if low_confidence else "ok",
         "engine": "deepseek",
         "confidence": round(confidence, 1),
         "raw_text": raw_text,
         "width": width,
         "height": height,
+        "records": records,
         "warnings": warnings,
     }
 
@@ -763,13 +827,13 @@ def _scan_with_trocr(
         warnings.insert(0, "La lectura salió con poca confianza; revisá los campos antes de guardar.")
 
     return {
-        **result,
         "status": "low_confidence" if low_confidence else "ok",
         "engine": "trocr",
         "confidence": round(confidence, 1),
         "raw_text": raw_text,
         "width": width,
         "height": height,
+        "records": [result],
         "warnings": warnings,
     }
 

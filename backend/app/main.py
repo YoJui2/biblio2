@@ -20,9 +20,10 @@ from app.inventory import (
 )
 from app.models import BibliographicRecord, InventoryCopy
 from app.schemas import (
+    BulkCreateResult,
     DeleteAllResult,
     ImportResult,
-    OCRResult,
+    OCRScanResult,
     OCRStatus,
     RecordCreate,
     RecordRead,
@@ -126,6 +127,55 @@ def create_app(
             ) from error
         session.refresh(record)
         return record_to_dict(record)
+
+    @application.post(
+        "/api/books/bulk",
+        response_model=BulkCreateResult,
+        status_code=201,
+        tags=["catálogo"],
+    )
+    def create_records_bulk(
+        payload: list[RecordCreate],
+        session: Annotated[Session, Depends(dependency)],
+    ):
+        if not payload:
+            raise HTTPException(
+                status_code=400, detail="No hay registros para guardar."
+            )
+        numbers = [
+            number for item in payload for number in item.inventory_numbers
+        ]
+        if len(numbers) != len(set(numbers)):
+            raise HTTPException(
+                status_code=409,
+                detail="Hay números de inventario repetidos entre los registros.",
+            )
+        validate_numbers_not_in_use(numbers, _active_inventory_numbers(session))
+        records = [
+            BibliographicRecord(
+                section=item.section,
+                title=item.title,
+                author=item.author,
+                imprint=item.imprint,
+                binding=item.binding,
+                inventory_source=item.inventory_source,
+                copies=[
+                    InventoryCopy(inventory_number=number)
+                    for number in item.inventory_numbers
+                ],
+            )
+            for item in payload
+        ]
+        session.add_all(records)
+        try:
+            session.commit()
+        except IntegrityError as error:
+            session.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Uno o más números de inventario ya están asignados.",
+            ) from error
+        return BulkCreateResult(records=len(records), copies=len(numbers))
 
     @application.put(
         "/api/books/{record_id}",
@@ -398,7 +448,7 @@ def create_app(
 
     @application.post(
         "/api/ocr/scan",
-        response_model=OCRResult,
+        response_model=OCRScanResult,
         tags=["ocr"],
     )
     async def scan_record_image(

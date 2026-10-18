@@ -127,6 +127,48 @@ def test_empty_trash_removes_all_trashed_records(client: TestClient) -> None:
     assert client.get("/api/trash").json() == []
 
 
+def test_bulk_create_saves_several_records(client: TestClient) -> None:
+    payload = [
+        {**_payload(title="Primero", inventory_numbers=[80, 81], inventory_source="80-81")},
+        {**_payload(title="Segundo", inventory_numbers=[90], inventory_source="90")},
+        {**_payload(title="Tercero", inventory_numbers=[100, 101, 102], inventory_source="100-102")},
+    ]
+
+    response = client.post("/api/books/bulk", json=payload)
+
+    assert response.status_code == 201
+    assert response.json() == {"records": 3, "copies": 6}
+    titles = [book["title"] for book in client.get("/api/books").json()]
+    assert titles == ["Primero", "Segundo", "Tercero"]
+
+
+def test_bulk_create_rejects_duplicates_within_batch(client: TestClient) -> None:
+    payload = [
+        {**_payload(title="Primero", inventory_numbers=[80], inventory_source="80")},
+        {**_payload(title="Segundo", inventory_numbers=[80, 81], inventory_source="80-81")},
+    ]
+
+    response = client.post("/api/books/bulk", json=payload)
+
+    assert response.status_code == 409
+    assert client.get("/api/books").json() == []
+
+
+def test_bulk_create_rejects_numbers_already_in_use(client: TestClient) -> None:
+    assert client.post("/api/books", json=_payload(inventory_numbers=[80])).status_code == 201
+
+    response = client.post(
+        "/api/books/bulk",
+        json=[_payload(title="Choque", inventory_numbers=[80, 81])],
+    )
+
+    assert response.status_code == 409
+
+
+def test_bulk_create_rejects_empty_batch(client: TestClient) -> None:
+    assert client.post("/api/books/bulk", json=[]).status_code == 400
+
+
 def test_csv_import_is_atomic_and_expands_inventory_ranges(client: TestClient) -> None:
     csv_text = (
         "Inventario de prueba\n"

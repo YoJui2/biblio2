@@ -11,8 +11,8 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=3" />
-    <script src="app.js?v=3" defer></script>
+    <link rel="stylesheet" href="styles.css?v=4" />
+    <script src="app.js?v=4" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -197,7 +197,7 @@
         </div>
         <div class="form-grid">
           <label class="form-field">N° de inventario <span class="required">*</span><input name="inventoryRange" required maxlength="40" placeholder="62 o 62-71" aria-describedby="inventory-help" /><span class="field-help" id="inventory-help">Se normaliza a INV-000062, INV-000063…</span></label>
-          <label class="form-field">Sección <span class="required">*</span><input name="section" required maxlength="120" list="category-options" placeholder="Ej. Educación" /><datalist id="category-options"></datalist></label>
+          <label class="form-field">Sección <span class="required">*</span><input name="section" required maxlength="120" list="category-options" placeholder="Ej. Educación" /></label>
           <label class="form-field field-wide">Título <span class="required">*</span><input name="title" required maxlength="300" placeholder="Título tal como figura en el catálogo" /></label>
           <label class="form-field field-wide">Autor/a <span class="required">*</span><input name="author" required maxlength="300" placeholder="Autor o autores" /></label>
           <label class="form-field field-wide">Pie de imprenta<input name="imprint" maxlength="300" placeholder="Lugar: editorial, año" /></label>
@@ -226,6 +226,31 @@
         </div>
       </div>
     </dialog>
+
+    <dialog class="book-dialog scan-dialog" id="scan-dialog" aria-labelledby="scan-title">
+      <div class="scan-body">
+        <div class="dialog-header">
+          <div><p class="eyebrow"><span class="eyebrow-line"></span> OCR · MULTI-REGISTRO</p><h2 id="scan-title">Registros detectados</h2><p class="dialog-description">Revisá y corregí cada fila antes de guardarlas. El OCR no guarda nada por su cuenta.</p></div>
+          <button class="icon-button close-scan" type="button" aria-label="Cerrar">×</button>
+        </div>
+        <div class="ocr-preview scan-preview" id="scan-preview" hidden>
+          <img id="scan-image" alt="Planilla escaneada" />
+          <p class="ocr-note" id="scan-note"></p>
+        </div>
+        <div class="ocr-alert" id="scan-alert" role="alert" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5m0 3.5v.01M10.3 3.9 2.6 17.4A1.6 1.6 0 0 0 4 19.9h16a1.6 1.6 0 0 0 1.4-2.5L13.7 3.9a1.6 1.6 0 0 0-2.8 0Z"/></svg>
+          <span id="scan-alert-message"></span>
+        </div>
+        <label class="form-field scan-section">Sección para todos <span class="required">*</span><input id="scan-section" list="category-options" maxlength="120" placeholder="Ej. Educación" /></label>
+        <div class="scan-list" id="scan-list"></div>
+        <p class="form-error" id="scan-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button class="button button-cancel" id="scan-cancel-button" type="button">Cancelar</button>
+          <button class="button button-primary" id="scan-save-button" type="button">Guardar registros</button>
+        </div>
+      </div>
+    </dialog>
+    <datalist id="category-options"></datalist>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>

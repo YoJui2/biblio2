@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.ocr import interpret_ocr_text
+from app.ocr import interpret_ocr_records_text, interpret_ocr_text
 
 
 def make_client(tmp_path) -> TestClient:
@@ -131,3 +131,58 @@ def test_ocr_scan_rejects_empty_file(tmp_path) -> None:
         )
 
     assert response.status_code == 400
+
+
+def test_interpret_records_splits_pipe_rows() -> None:
+    text = (
+        "166, 182 | Vasallo, L. | Nociones de química | Cartón | Bs.As.: Kapelusz, 1997\n"
+        "200 | María López | Matemática 6 | Cartoné | Buenos Aires: Estrada, 2010\n"
+    )
+
+    records = interpret_ocr_records_text(text)
+
+    assert len(records) == 2
+    assert records[0]["inventory_numbers"] == [166, 182]
+    assert records[0]["author"] == "Vasallo, L."
+    assert records[0]["title"] == "Nociones de química"
+    assert records[0]["binding"] == "Cartón"
+    assert records[0]["imprint"] == "Bs.As.: Kapelusz, 1997"
+    assert records[1]["inventory_numbers"] == [200]
+    assert records[1]["title"] == "Matemática 6"
+
+
+def test_interpret_records_strips_list_markers_and_pads_fields() -> None:
+    records = interpret_ocr_records_text("1. 62, 65 | Autora | Obra en tomos\n")
+
+    assert len(records) == 1
+    assert records[0]["inventory_numbers"] == [62, 65]
+    assert records[0]["title"] == "Obra en tomos"
+    assert records[0]["author"] == "Autora"
+    assert records[0]["imprint"] == ""
+    assert records[0]["inventory_source"] == "62, 65"
+
+
+def test_interpret_records_expands_ranges_per_row() -> None:
+    records = interpret_ocr_records_text("62-64 | Autora | Obra\n")
+
+    assert records[0]["inventory_numbers"] == [62, 63, 64]
+    assert records[0]["inventory_source"] == "62-64"
+
+
+def test_interpret_records_falls_back_to_single_record() -> None:
+    records = interpret_ocr_records_text("Ninv: 62\nTítulo: Obra\nAutor: Autora")
+
+    assert len(records) == 1
+    assert records[0]["inventory_numbers"] == [62]
+    assert records[0]["title"] == "Obra"
+    assert records[0]["author"] == "Autora"
+
+
+def test_interpret_records_warns_on_missing_fields() -> None:
+    records = interpret_ocr_records_text(" |  | Solo título |  | \n")
+
+    assert len(records) == 1
+    assert records[0]["title"] == "Solo título"
+    assert records[0]["inventory_numbers"] == []
+    assert "Sin números de inventario." in records[0]["warnings"]
+    assert "Sin autor." in records[0]["warnings"]
