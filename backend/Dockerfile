@@ -21,6 +21,7 @@ RUN mkdir -p /app/ui
 
 COPY backend /app/backend
 COPY index.html styles.css app.js /app/ui/
+COPY Entrevistas_Contexto /app/Entrevistas_Contexto
 
 WORKDIR /app/backend
 EXPOSE 8000

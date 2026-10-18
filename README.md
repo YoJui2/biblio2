@@ -85,16 +85,22 @@ La primera lectura con TrOCR puede tardar más porque carga el modelo en memoria
 
 ## ChatBot del inventario
 
-En el menú principal, debajo de **Inventario**, está **ChatBot**: un asistente que responde preguntas sobre el catálogo en lenguaje natural. Antes de cada consulta, la API arma un **resumen** del inventario (registros, ejemplares y secciones) y un listado compacto de las fichas (`INV-000062 | Sección | «Título» | Autor | Pie de imprenta | Encuadernación`). Ese contexto se envía a la API de DeepSeek con el **modelo de chat más económico** (`deepseek-chat`) y el asistente responde **solo con esos datos**.
+En el menú principal, debajo de **Inventario**, está **ChatBot**: un asistente que responde preguntas sobre el catálogo y sobre el funcionamiento interno de la biblioteca en lenguaje natural. Antes de cada consulta, la API arma un **resumen** del inventario (registros, ejemplares y secciones) y un listado compacto de las fichas (`INV-000062 | Sección | «Título» | Autor | Pie de imprenta | Encuadernación`). Ese contexto más la **base de conocimiento institucional** se envían a la API de DeepSeek con el **modelo de chat más económico** (`deepseek-chat`), y el asistente responde **solo con esos datos**.
 
-- **Responde** por título, autor, sección, pie de imprenta o número de inventario; también puede contar registros y ejemplares.
-- Si el libro **no está en el catálogo**, lo dice y sugiere revisar el título, el autor o la sección.
-- Si **no entiende la pregunta**, pide que la reformulen en lugar de adivinar.
-- No inventa disponibilidad ni préstamos: del ejemplar solo se conoce la encuadernación u observaciones.
+- **Inventario:** responde por título, autor, sección, pie de imprenta o número de inventario; también puede contar registros y ejemplares.
+- **Institucional:** responde sobre préstamos, asociación, sanciones, horarios, computadoras y criterios internos, a partir de las entrevistas de la carpeta [`Entrevistas_Contexto/`](./Entrevistas_Contexto/).
+- Si el libro **no está en el catálogo**, lo dice y sugiere revisar el título, el autor o la sección. Si la pregunta **no está en ninguna fuente** o es confusa, pide que la reformulen en lugar de adivinar.
+- No inventa disponibilidad ni préstamos: del ejemplar solo se conoce la encuadernación u observaciones. Si las normas internas y el inventario se contradicen sobre disponibilidad, prioriza el inventario.
 - La conversación recentísima se envía como historial para dar contexto, y se mantiene **en el navegador**: al recargar o pulsar **Limpiar chat** se reinicia.
 - Si falta `DEEPSEEK_API_KEY`, `GET /api/chat/status` devuelve `available: false` y el panel lo avisa.
 
-`POST /api/chat` recibe `{ "message": "...", "history": [{ "role": "user|assistant", "content": "..." }] }` y devuelve `{ "reply": "...", "model": "deepseek-chat" }`. El asistente **no modifica** la base: solo lee el catálogo.
+### Base de conocimiento institucional
+
+Todo archivo `.md`, `.markdown` o `.txt` que esté en la carpeta `Entrevistas_Contexto/` se concatena y se envía como contexto estable (lo que además aprovecha el caché de prompt de DeepSeek). Para sumar una nueva entrevista o normativa, dejá el archivo en esa carpeta (por ejemplo `EntrevistaV2.md`): se toma automáticamente al reiniciar la API, sin cambios de código. El directorio se puede cambiar con la variable `LIBRARY_CONTEXT_DIR`.
+
+`GET /api/chat/status` informa `context_files` con la cantidad de archivos cargados. `POST /api/chat` recibe `{ "message": "...", "history": [{ "role": "user|assistant", "content": "..." }] }` y devuelve `{ "reply": "...", "model": "deepseek-chat" }`. El asistente **no modifica** la base: solo lee el catálogo y el contexto.
+
+> Nota: la ficha institucional V1 menciona que el catálogo no está digitalizado. En este sistema, la disponibilidad se responde con el inventario en vivo, que es la fuente prioritaria.
 
 ## Formato del CSV
 
@@ -212,6 +218,7 @@ El CSV agrupa varios números bajo un mismo registro bibliográfico. Esto modela
 - [`backend/app/`](./backend/app/): API FastAPI, modelos, validación, importación, OCR y ChatBot.
 - [`backend/migrations/`](./backend/migrations/): migraciones versionadas con Alembic.
 - [`backend/tests/`](./backend/tests/): pruebas de importación, API y migraciones.
+- [`Entrevistas_Contexto/`](./Entrevistas_Contexto/): base de conocimiento institucional (entrevistas y normativas) que alimenta al ChatBot.
 - [`backend/requirements.txt`](./backend/requirements.txt): dependencias de la API, instaladas durante la construcción de la imagen Docker.
 - [`.env.example`](./.env.example): plantilla de variables; copiá a `.env` y reemplazá las contraseñas locales.
 - [`docker-compose.yml`](./docker-compose.yml): MySQL y API para ejecutarse con Docker Compose.

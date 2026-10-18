@@ -72,6 +72,37 @@ def test_context_includes_summary_and_records() -> None:
     assert "El Principito" in catalog
 
 
+def test_load_library_context_reads_markdown_and_text(monkeypatch, tmp_path) -> None:
+    context_dir = tmp_path / "ctx"
+    context_dir.mkdir()
+    (context_dir / "EntrevistaV1.md").write_text(
+        "# Normas\nPréstamo a domicilio solo socios.", encoding="utf-8"
+    )
+    (context_dir / "notas.txt").write_text("Horario de 18 a 22.", encoding="utf-8")
+    (context_dir / "dato.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(chatbot, "context_directory", lambda: context_dir)
+
+    text, count = chatbot.load_library_context()
+
+    assert count == 2
+    assert "Préstamo a domicilio solo socios." in text
+    assert "Horario de 18 a 22." in text
+    assert "dato.json" not in text
+
+
+def test_chat_status_reports_context_files(monkeypatch, tmp_path) -> None:
+    context_dir = tmp_path / "ctx"
+    context_dir.mkdir()
+    (context_dir / "EntrevistaV1.md").write_text("Normas internas.", encoding="utf-8")
+    monkeypatch.setattr(chatbot, "context_directory", lambda: context_dir)
+    monkeypatch.setattr(chatbot, "_api_key", lambda: "test-key")
+
+    with make_client(tmp_path) as client:
+        body = client.get("/api/chat/status").json()
+
+    assert body["context_files"] == 1
+
+
 def test_chat_status_reports_unavailable_without_key(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(chatbot, "_api_key", lambda: "")
 
@@ -145,3 +176,37 @@ def test_chat_answers_using_inventory_context(monkeypatch, tmp_path) -> None:
     assert "INV-000062" in user_content
     assert "Matemática 6" in user_content
     assert messages[0]["role"] == "system"
+
+
+def test_chat_includes_institutional_context(monkeypatch, tmp_path) -> None:
+    context_dir = tmp_path / "ctx"
+    context_dir.mkdir()
+    (context_dir / "EntrevistaV1.md").write_text(
+        "Préstamo a domicilio solo para socios activos.", encoding="utf-8"
+    )
+    monkeypatch.setattr(chatbot, "context_directory", lambda: context_dir)
+    monkeypatch.setattr(chatbot, "_api_key", lambda: "test-key")
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": "Sí, siendo socio activo."}}]}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    with make_client(tmp_path) as client:
+        response = client.post(
+            "/api/chat", json={"message": "¿Puedo llevarme un libro a casa?"}
+        )
+
+    assert response.status_code == 200
+    system_content = captured["payload"]["messages"][0]["content"]
+    assert "CONOCIMIENTO INSTITUCIONAL" in system_content
+    assert "solo para socios activos" in system_content

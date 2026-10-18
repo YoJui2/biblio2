@@ -64,7 +64,7 @@ let chatHistory = [];
 let chatBusy = false;
 let chatStarted = false;
 
-const CHAT_WELCOME = "Hola, soy el asistente del inventario. Preguntame por un título, un autor, una sección o un número como INV-000062. Si el libro no está en el catálogo, te lo digo.";
+const CHAT_WELCOME = "Hola, soy el asistente de la biblioteca. Preguntame por un libro (título, autor, sección o un número como INV-000062) o por el funcionamiento de la biblioteca: préstamos, cómo asociarte, horarios y computadoras. Si no está en el catálogo o no lo sé, te lo digo.";
 
 function applyTheme(theme) {
   const selectedTheme = theme === "light" ? "light" : "dark";
@@ -912,9 +912,12 @@ async function loadChatStatus() {
   try {
     const status = await apiRequest("/api/chat/status");
     if (status.model) elements.chatModelPill.textContent = status.model;
+    const files = status.context_files
+      ? ` · ${status.context_files} archivo(s) de normas internas`
+      : "";
     elements.chatStatus.classList.toggle("error", status.available === false);
     elements.chatStatus.textContent = status.available
-      ? `Modelo económico: ${status.model}`
+      ? `Modelo económico: ${status.model}${files}`
       : status.detail || "El asistente no está disponible.";
   } catch (error) {
     elements.chatStatus.classList.add("error");

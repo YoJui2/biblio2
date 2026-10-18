@@ -142,4 +142,5 @@ class ChatReply(BaseModel):
 class ChatbotStatus(BaseModel):
     available: bool
     model: str
+    context_files: int = 0
     detail: str | None = None

@@ -43,24 +43,35 @@ MAX_CONTEXT_CHARS = 48_000
 MAX_MATCHES = 60
 MAX_HISTORY = 8
 MAX_HISTORY_CHARS = 2_000
+CONTEXT_DIRNAME = "Entrevistas_Contexto"
+MAX_CONTEXT_FILE_CHARS = 20_000
+MAX_LIBRARY_CONTEXT_CHARS = 30_000
+CONTEXT_SUFFIXES = (".md", ".markdown", ".txt")
+_CONTEXT_CACHE: dict[str, object] = {"signature": None, "text": "", "count": 0}
 
 _SYSTEM_PROMPT = (
-    "Sos el asistente bibliotecario del inventario de una biblioteca. "
-    "Respondés en español, con claridad y brevedad, y usás ÚNICAMENTE los datos "
-    "del inventario que se incluyen en el mensaje.\n"
+    "Sos el asistente bibliotecario de la Biblioteca Provincial N° 349 (BP 349). "
+    "Respondés en español, con claridad y brevedad, y usás ÚNICAMENTE estas dos "
+    "fuentes, que se incluyen en el mensaje:\n"
+    "1) CONOCIMIENTO INSTITUCIONAL: cómo funciona la biblioteca puertas adentro "
+    "(préstamos, asociación, sanciones, horarios, computadoras, criterios internos).\n"
+    "2) INVENTARIO: el catálogo en vivo de libros y ejemplares.\n"
     "Reglas obligatorias:\n"
-    "- No inventes títulos, autores, secciones ni números de inventario que no figuren "
-    "en el contexto.\n"
-    "- Si te preguntan por un libro que no aparece en las fichas, respondé que no lo "
-    "encontraste en el inventario y, si podés, sugerí revisar el título, el autor o la "
+    "- No inventes políticas, títulos, autores, secciones ni números de inventario.\n"
+    "- Para saber si existe un libro o cuántos ejemplares hay, usá el INVENTARIO; si no "
+    "aparece, respondé que no lo encontraste y sugerí revisar el título, el autor o la "
     "sección.\n"
-    "- Si la pregunta es confusa o no se entiende, pedí que la reformulen de forma "
-    "concreta en lugar de adivinar.\n"
-    "- Cada ficha tiene el formato: números de inventario | sección | título | autor | "
+    "- Para trámites y servicios (asociarse, préstamos, sanciones, horarios, netbooks, "
+    "material especial) usá el CONOCIMIENTO INSTITUCIONAL.\n"
+    "- Si la pregunta no está cubierta por ninguna de las dos fuentes, o es confusa, "
+    "decí que no lo sabés y pedí que la reformulen; no adivines.\n"
+    "- Si el conocimiento institucional y el inventario se contradicen sobre la "
+    "disponibilidad de un libro, priorizá el inventario (es el estado actual).\n"
+    "- Cada ficha del inventario tiene el formato: números | sección | título | autor | "
     "pie de imprenta | encuadernación. Un rango como 62-71 son ejemplares del mismo "
     "registro; los números se muestran como INV-000062.\n"
-    "- Lo único que se sabe de cada ejemplar es la encuadernación u observaciones: no "
-    "inventes disponibilidad, préstamos ni estado físico.\n"
+    "- Del ejemplar solo se conoce la encuadernación u observaciones: no inventes estado "
+    "físico, préstamos ni disponibilidad.\n"
     "- Si te piden totales, usá el resumen del inventario que se incluye."
 )
 
@@ -249,11 +260,61 @@ def _chat_model() -> str:
     return _setting("DEEPSEEK_CHAT_MODEL", DEFAULT_CHAT_MODEL)
 
 
+def context_directory() -> Path:
+    """Carpeta con la base de conocimiento institucional (entrevistas, normas)."""
+
+    configured = _setting("LIBRARY_CONTEXT_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    return _PROJECT_ROOT / CONTEXT_DIRNAME
+
+
+def load_library_context() -> tuple[str, int]:
+    """Lee los .md/.txt de la carpeta de contexto y los une en un bloque.
+
+    El resultado se cachea y solo se vuelve a leer si cambia algún archivo, así
+    el texto institucional se envía como prefijo estable (mejor caché de prompt).
+    """
+
+    directory = context_directory()
+    try:
+        files = sorted(
+            path
+            for path in directory.iterdir()
+            if path.is_file() and path.suffix.lower() in CONTEXT_SUFFIXES
+        )
+    except OSError:
+        return "", 0
+    try:
+        signature = tuple((str(path), path.stat().st_mtime_ns) for path in files)
+    except OSError:
+        return "", 0
+
+    if _CONTEXT_CACHE["signature"] == signature:
+        return str(_CONTEXT_CACHE["text"]), int(_CONTEXT_CACHE["count"])
+
+    parts: list[str] = []
+    for path in files:
+        try:
+            content = path.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            continue
+        if content:
+            parts.append(f"### {path.name}\n{content[:MAX_CONTEXT_FILE_CHARS]}")
+    text = "\n\n".join(parts)
+    if len(text) > MAX_LIBRARY_CONTEXT_CHARS:
+        text = text[:MAX_LIBRARY_CONTEXT_CHARS]
+    _CONTEXT_CACHE.update(signature=signature, text=text, count=len(parts))
+    return text, len(parts)
+
+
 def chatbot_status() -> dict[str, object]:
     available = bool(_api_key())
+    _, context_files = load_library_context()
     return {
         "available": available,
         "model": _chat_model(),
+        "context_files": context_files,
         "detail": None
         if available
         else "Falta DEEPSEEK_API_KEY. Configurá la clave en el archivo .env.",
@@ -290,7 +351,20 @@ def answer_question(
         f"{catalog}{note}\n\n"
         f"Pregunta: {message}"
     )
-    messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+
+    library_context, context_files = load_library_context()
+    if library_context:
+        system_content = (
+            f"{_SYSTEM_PROMPT}\n\n"
+            "# CONOCIMIENTO INSTITUCIONAL DE LA BIBLIOTECA\n"
+            "(Cómo funciona la biblioteca puertas adentro. Usalo para responder "
+            "sobre trámites, servicios y normas internas.)\n"
+            f"{library_context}"
+        )
+    else:
+        system_content = _SYSTEM_PROMPT
+
+    messages = [{"role": "system", "content": system_content}]
     messages.extend(_sanitize_history(history))
     messages.append({"role": "user", "content": user_content})
 
@@ -340,5 +414,10 @@ def answer_question(
     if not reply:
         raise ChatbotError("El modelo no devolvió una respuesta.")
 
-    logger.info("ChatBot DeepSeek (%s): %d fichas en contexto.", model, included)
-    return {"reply": reply, "model": model}
+    logger.info(
+        "ChatBot DeepSeek (%s): %d fichas y %d archivo(s) de contexto institucional.",
+        model,
+        included,
+        context_files,
+    )
+    return {"reply": reply, "model": model, "context_files": context_files}
