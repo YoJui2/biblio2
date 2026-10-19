@@ -102,13 +102,14 @@ En el menú principal, debajo de **Inventario**, está **ChatBot**: un asistente
 - La conversación recentísima se envía como historial para dar contexto, y se mantiene **en el navegador**: al recargar o pulsar **Limpiar chat** se reinicia.
 - Si falta la API key (`CHATBOT_API_KEY` o `DEEPSEEK_API_KEY`), `GET /api/chat/status` devuelve `available: false` y el panel lo avisa.
 - Por defecto el ChatBot usa **Google Gemini** (`gemini-2.5-flash`): pegá tu clave `AIza…` en `CHATBOT_API_KEY`. El OCR sigue usando DeepSeek.
+- **Respaldo automático:** si el proveedor principal se queda **sin tokens o saldo** (cuota agotada, `429`, `402`, `403` o fallo de red), el ChatBot reintenta en el acto con **DeepSeek** usando `DEEPSEEK_API_KEY`; el campo `model` de la respuesta indica qué proveedor contestó. `GET /api/chat/status` informa el respaldo en `fallback_model`.
 - El ChatBot puede usar **cualquier proveedor compatible con OpenAI** cambiando `CHATBOT_API_KEY`, `CHATBOT_BASE_URL` y `CHATBOT_MODEL`. Si dejás `CHATBOT_*` en blanco, usa DeepSeek con `deepseek-chat`.
 
 ### Base de conocimiento institucional
 
 Todo archivo `.md`, `.markdown` o `.txt` que esté en la carpeta `Entrevistas_Contexto/` se concatena y se envía como contexto estable (lo que además aprovecha el caché de prompt del proveedor). Para sumar una nueva entrevista o normativa, dejá el archivo en esa carpeta (por ejemplo `EntrevistaV2.md`): se toma automáticamente al reiniciar la API, sin cambios de código. El directorio se puede cambiar con la variable `LIBRARY_CONTEXT_DIR`.
 
-`GET /api/chat/status` informa `context_files` con la cantidad de archivos cargados. `POST /api/chat` recibe `{ "message": "...", "history": [{ "role": "user|assistant", "content": "..." }] }` y devuelve `{ "reply": "...", "model": "deepseek-chat" }`. El asistente **no modifica** la base: solo lee el catálogo y el contexto.
+`GET /api/chat/status` informa `context_files` con la cantidad de archivos cargados y `fallback_model` con el respaldo DeepSeek (si está configurado). `POST /api/chat` recibe `{ "message": "...", "history": [{ "role": "user|assistant", "content": "..." }] }` y devuelve `{ "reply": "...", "model": "gemini-2.5-flash" }`; si el principal se queda sin tokens, `model` será `deepseek-chat`. El asistente **no modifica** la base: solo lee el catálogo y el contexto.
 
 > Nota: la ficha institucional V1 menciona que el catálogo no está digitalizado. En este sistema, la disponibilidad se responde con el inventario en vivo, que es la fuente prioritaria.
 

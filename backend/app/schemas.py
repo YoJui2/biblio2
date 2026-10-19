@@ -139,5 +139,6 @@ class ChatReply(BaseModel):
 class ChatbotStatus(BaseModel):
     available: bool
     model: str
+    fallback_model: str | None = None
     context_files: int = 0
     detail: str | None = None

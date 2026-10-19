@@ -1,10 +1,14 @@
-"""Asistente del catálogo: responde preguntas sobre el inventario con DeepSeek.
+"""Asistente del catálogo: responde preguntas sobre el inventario.
 
 El contexto se arma con los registros activos de la base (título, autor, pie de
-imprenta, encuadernación y números de inventario). El modelo de
-chat **más económico** de DeepSeek responde usando **solo** esos datos: si el
-libro no está en el catálogo, o la pregunta no se entiende, lo dice en lugar de
-inventar una respuesta.
+imprenta, encuadernación y números de inventario). El proveedor configurado en
+``CHATBOT_*`` (por defecto Google Gemini) responde usando **solo** esos datos: si
+el libro no está en el catálogo, o la pregunta no se entiende, lo dice en lugar
+de inventar una respuesta.
+
+Si el proveedor principal se queda sin tokens/saldo (cuota agotada, ``429``,
+``402``, ``403`` o error de red), el asistente reintenta automáticamente con
+**DeepSeek** usando ``DEEPSEEK_API_KEY``, para no dejar el ChatBot sin respuesta.
 """
 
 from __future__ import annotations
@@ -35,12 +39,15 @@ def _setting(name: str, default: str = "") -> str:
     return str(value).strip()
 
 
-# `deepseek-chat` es el modelo de chat más económico de la API (sin cadena de
-# razonamiento). Se puede cambiar con CHATBOT_MODEL (o DEEPSEEK_CHAT_MODEL); con
-# CHATBOT_API_KEY/CHATBOT_BASE_URL se puede apuntar a cualquier proveedor
-# OpenAI-compatible (p. ej. un modelo gratuito).
-DEFAULT_CHAT_MODEL = "deepseek-chat"
-DEFAULT_BASE_URL = "https://api.deepseek.com"
+# Por defecto el ChatBot usa Google Gemini (endpoint compatible con OpenAI). Se
+# puede cambiar con CHATBOT_MODEL/CHATBOT_BASE_URL/CHATBOT_API_KEY para apuntar a
+# cualquier proveedor OpenAI-compatible. Si CHATBOT_* queda en blanco, se usa
+# DeepSeek con las variables DEEPSEEK_*. Ante falta de tokens/saldo del
+# proveedor principal, se reintenta con DeepSeek (DEEPSEEK_API_KEY) como respaldo.
+DEFAULT_CHAT_MODEL = "gemini-2.5-flash"
+DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+DEEPSEEK_DEFAULT_CHAT_MODEL = "deepseek-chat"
+DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com"
 MAX_CONTEXT_CHARS = 48_000
 MAX_MATCHES = 60
 MAX_HISTORY = 8
@@ -254,19 +261,86 @@ def _api_key() -> str:
     key = _setting("CHATBOT_API_KEY")
     if key:
         return key
-    # Si el chat apunta a otro proveedor, no reusamos la clave de DeepSeek.
-    if _setting("CHATBOT_BASE_URL"):
+    # Si el chat se configuró para otro proveedor, no reusamos la clave de DeepSeek.
+    if _setting("CHATBOT_BASE_URL") or _setting("CHATBOT_MODEL"):
         return ""
     return _setting("DEEPSEEK_API_KEY")
 
 
+def _uses_deepseek_primary() -> bool:
+    """True si el proveedor principal termina siendo DeepSeek (sin CHATBOT_API_KEY)."""
+
+    deepseek_key = _setting("DEEPSEEK_API_KEY")
+    return bool(deepseek_key) and _api_key() == deepseek_key
+
+
 def _base_url() -> str:
-    base = _setting("CHATBOT_BASE_URL") or _setting("DEEPSEEK_BASE_URL", DEFAULT_BASE_URL)
-    return base.rstrip("/")
+    configured = _setting("CHATBOT_BASE_URL")
+    if configured:
+        return configured.rstrip("/")
+    if _uses_deepseek_primary():
+        return _setting("DEEPSEEK_BASE_URL", DEEPSEEK_DEFAULT_BASE_URL).rstrip("/")
+    return DEFAULT_BASE_URL
 
 
 def _chat_model() -> str:
-    return _setting("CHATBOT_MODEL") or _setting("DEEPSEEK_CHAT_MODEL", DEFAULT_CHAT_MODEL)
+    configured = _setting("CHATBOT_MODEL")
+    if configured:
+        return configured
+    if _uses_deepseek_primary():
+        return _setting("DEEPSEEK_CHAT_MODEL", DEEPSEEK_DEFAULT_CHAT_MODEL)
+    return DEFAULT_CHAT_MODEL
+
+
+def _deepseek_provider() -> dict[str, str] | None:
+    """Proveedor de respaldo: DeepSeek con su clave propia (también usada por el OCR)."""
+
+    key = _setting("DEEPSEEK_API_KEY")
+    if not key:
+        return None
+    return {
+        "name": "DeepSeek",
+        "api_key": key,
+        "base_url": _setting("DEEPSEEK_BASE_URL", DEEPSEEK_DEFAULT_BASE_URL).rstrip("/"),
+        "model": _setting("DEEPSEEK_CHAT_MODEL", DEEPSEEK_DEFAULT_CHAT_MODEL),
+    }
+
+
+def chat_providers() -> list[dict[str, str]]:
+    """Cadena de proveedores en orden: primero el configurado, luego DeepSeek.
+
+    El respaldo se agrega solo si hay ``DEEPSEEK_API_KEY`` y no es el mismo
+    proveedor que el principal (para no repetir la misma llamada).
+    """
+
+    providers: list[dict[str, str]] = []
+    primary_key = _api_key()
+    if primary_key:
+        providers.append(
+            {
+                "name": "principal",
+                "api_key": primary_key,
+                "base_url": _base_url(),
+                "model": _chat_model(),
+            }
+        )
+    fallback = _deepseek_provider()
+    if fallback is not None:
+        duplicated = bool(primary_key) and primary_key == fallback["api_key"] and (
+            _base_url() == fallback["base_url"]
+        )
+        if not duplicated:
+            providers.append(fallback)
+    return providers
+
+
+def fallback_model() -> str | None:
+    """Modelo de respaldo (DeepSeek) que se usaría si el principal falla."""
+
+    providers = chat_providers()
+    if len(providers) > 1:
+        return providers[-1]["model"]
+    return None
 
 
 def context_directory() -> Path:
@@ -320,13 +394,15 @@ def load_library_context() -> tuple[str, int]:
 def chatbot_status() -> dict[str, object]:
     available = bool(_api_key())
     _, context_files = load_library_context()
+    detail = None
+    if not available:
+        detail = "Falta CHATBOT_API_KEY. Configurá la clave del asistente en .env."
     return {
         "available": available,
         "model": _chat_model(),
+        "fallback_model": fallback_model(),
         "context_files": context_files,
-        "detail": None
-        if available
-        else "Falta CHATBOT_API_KEY. Configurá la clave del asistente en .env.",
+        "detail": detail,
     }
 
 
@@ -378,25 +454,55 @@ def answer_question(
     messages.extend(_sanitize_history(history))
     messages.append({"role": "user", "content": user_content})
 
-    model = _chat_model()
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": 0.2,
-        "stream": False,
-    }
-
     try:
         import httpx
     except ImportError as error:
         raise ChatbotUnavailable("Falta la librería httpx en el servidor.") from error
 
+    providers = chat_providers()
+    last_error: ChatbotError | None = None
+    for provider in providers:
+        try:
+            reply = _call_chat_provider(httpx, provider, messages)
+        except ChatbotError as error:
+            last_error = error
+            has_backup = provider is not providers[-1]
+            logger.warning(
+                "ChatBot: el proveedor %s (%s) falló: %s. %s",
+                provider["name"],
+                provider["model"],
+                error,
+                "Reintentando con DeepSeek." if has_backup else "Sin más respaldos.",
+            )
+            continue
+        logger.info(
+            "ChatBot (%s): %d fichas y %d archivo(s) de contexto institucional.",
+            provider["model"],
+            included,
+            context_files,
+        )
+        return {"reply": reply, "model": provider["model"], "context_files": context_files}
+
+    raise last_error or ChatbotError("No se pudo obtener una respuesta del asistente.")
+
+
+def _call_chat_provider(
+    httpx, provider: dict[str, str], messages: list[dict[str, str]]
+) -> str:
+    """Llama a un proveedor OpenAI-compatible y devuelve el texto de la respuesta."""
+
+    payload = {
+        "model": provider["model"],
+        "messages": messages,
+        "temperature": 0.2,
+        "stream": False,
+    }
     timeout = float(_setting("DEEPSEEK_TIMEOUT", "60"))
     try:
         response = httpx.post(
-            f"{_base_url()}/chat/completions",
+            f"{provider['base_url']}/chat/completions",
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "Authorization": f"Bearer {provider['api_key']}",
                 "Content-Type": "application/json",
             },
             json=payload,
@@ -409,12 +515,12 @@ def answer_question(
         detail = response.text.strip()[:500]
         if response.status_code in (401, 402, 403):
             raise ChatbotUnavailable(
-                f"El proveedor del asistente rechazó la clave o el saldo: {detail}"
+                f"El proveedor rechazó la clave, el saldo o la cuota: {detail}"
             )
         if response.status_code == 429:
             raise ChatbotError(
-                "El asistente está recibiendo muchas consultas en este momento. "
-                "Esperá unos segundos y volvé a intentar."
+                "El asistente agotó su cuota de tokens o está recibiendo muchas "
+                f"consultas ({detail})."
             )
         raise ChatbotError(
             f"La API del asistente respondió con el estado {response.status_code}: {detail}"
@@ -428,11 +534,4 @@ def answer_question(
 
     if not reply:
         raise ChatbotError("El modelo no devolvió una respuesta.")
-
-    logger.info(
-        "ChatBot (%s): %d fichas y %d archivo(s) de contexto institucional.",
-        model,
-        included,
-        context_files,
-    )
-    return {"reply": reply, "model": model, "context_files": context_files}
+    return reply

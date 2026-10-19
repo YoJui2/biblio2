@@ -175,6 +175,87 @@ def test_chat_answers_using_inventory_context(monkeypatch, tmp_path) -> None:
     assert messages[0]["role"] == "system"
 
 
+def test_chat_providers_add_deepseek_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(chatbot, "_api_key", lambda: "gemini-key")
+    monkeypatch.setattr(chatbot, "_base_url", lambda: "https://gemini.test")
+    monkeypatch.setattr(chatbot, "_chat_model", lambda: "gemini-2.5-flash")
+    monkeypatch.setattr(
+        chatbot,
+        "_deepseek_provider",
+        lambda: {
+            "name": "DeepSeek",
+            "api_key": "deepseek-key",
+            "base_url": "https://deepseek.test",
+            "model": "deepseek-chat",
+        },
+    )
+
+    models = [provider["model"] for provider in chatbot.chat_providers()]
+
+    assert models == ["gemini-2.5-flash", "deepseek-chat"]
+
+
+def test_chat_providers_skip_duplicate_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(chatbot, "_api_key", lambda: "same-key")
+    monkeypatch.setattr(chatbot, "_base_url", lambda: "https://same.test")
+    monkeypatch.setattr(chatbot, "_chat_model", lambda: "same-model")
+    monkeypatch.setattr(
+        chatbot,
+        "_deepseek_provider",
+        lambda: {
+            "name": "DeepSeek",
+            "api_key": "same-key",
+            "base_url": "https://same.test",
+            "model": "deepseek-chat",
+        },
+    )
+
+    assert len(chatbot.chat_providers()) == 1
+
+
+def test_chat_falls_back_when_primary_runs_out_of_tokens(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(chatbot, "_api_key", lambda: "gemini-key")
+    providers = [
+        {
+            "name": "principal",
+            "api_key": "gemini-key",
+            "base_url": "https://gemini.test",
+            "model": "gemini-2.5-flash",
+        },
+        {
+            "name": "DeepSeek",
+            "api_key": "deepseek-key",
+            "base_url": "https://deepseek.test",
+            "model": "deepseek-chat",
+        },
+    ]
+    monkeypatch.setattr(chatbot, "chat_providers", lambda: providers)
+    calls: list[str] = []
+
+    class FakeResponse:
+        def __init__(self, status_code, content=""):
+            self.status_code = status_code
+            self.text = content
+
+        def json(self):
+            return {"choices": [{"message": {"content": "Hay 2 ejemplares."}}]}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(url)
+        if "gemini" in url:
+            return FakeResponse(429, "quota exceeded")
+        return FakeResponse(200, "Hay 2 ejemplares.")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    with make_client(tmp_path) as client:
+        response = client.post("/api/chat", json={"message": "¿Cuántos libros hay?"})
+
+    assert response.status_code == 200
+    assert response.json()["model"] == "deepseek-chat"
+    assert "deepseek" in calls[-1]
+
+
 def test_chat_includes_institutional_context(monkeypatch, tmp_path) -> None:
     context_dir = tmp_path / "ctx"
     context_dir.mkdir()
