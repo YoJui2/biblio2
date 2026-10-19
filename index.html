@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css?v=11" />
-    <script src="app.js?v=11" defer></script>
+    <script src="app.js?v=13" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -125,9 +125,9 @@
                 <input id="csv-input" type="file" accept=".csv,text/csv" hidden />
                 <label class="button button-export" for="ocr-input">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M8 12h8"/></svg>
-                  Leer imagen (OCR)
+                  Leer imágenes (OCR)
                 </label>
-                <input id="ocr-input" type="file" accept="image/*" hidden />
+                <input id="ocr-input" type="file" accept="image/*" multiple hidden />
                 <span class="ocr-status" id="ocr-status" role="status" hidden><span class="spinner" aria-hidden="true"></span><span id="ocr-status-text">Escaneando la imagen…</span></span>
                 <button class="button button-export" id="export-button" type="button">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v11m0 0 4-4m-4 4-4-4M5 16.5v4h14v-4"/></svg>
@@ -213,10 +213,10 @@
         <div class="ocr-loader">
           <label class="button button-export" for="ocr-dialog-input">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M8 12h8"/></svg>
-            Cargar imagen
+            Cargar imágenes
           </label>
-          <input id="ocr-dialog-input" type="file" accept="image/*" hidden />
-          <span class="ocr-loader-hint" id="ocr-loader-hint">Leé una ficha escaneada y se completan los campos.</span>
+          <input id="ocr-dialog-input" type="file" accept="image/*" multiple hidden />
+          <span class="ocr-loader-hint" id="ocr-loader-hint">Leé una o varias fichas escaneadas y se completan los campos.</span>
         </div>
         <div class="ocr-alert" id="ocr-alert" role="alert" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5m0 3.5v.01M10.3 3.9 2.6 17.4A1.6 1.6 0 0 0 4 19.9h16a1.6 1.6 0 0 0 1.4-2.5L13.7 3.9a1.6 1.6 0 0 0-2.8 0Z"/></svg>

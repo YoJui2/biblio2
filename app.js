@@ -441,25 +441,35 @@ function openChoiceDialog({ title, message, eyebrow = "CONFIRMACIÓN", options }
   elements.confirmActions.innerHTML = "";
   return new Promise((resolve) => {
     let settled = false;
-    const finish = (value) => {
+    const onClose = () => {
       if (settled) return;
       settled = true;
-      if (dialog.open) dialog.close();
-      resolve(value);
+      dialog.removeEventListener("close", onClose);
+      dialog.removeEventListener("cancel", onCancel);
+      const selected = options.find(
+        (option) => String(option.value) === dialog.returnValue,
+      );
+      resolve(selected ? selected.value : null);
+    };
+    const onCancel = (event) => {
+      event.preventDefault();
+      dialog.returnValue = "";
+      dialog.close();
     };
     options.forEach((option) => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = `button ${option.className || "button-cancel"}`;
       button.textContent = option.label;
-      button.addEventListener("click", () => finish(option.value));
+      button.addEventListener("click", () => {
+        dialog.returnValue = String(option.value);
+        dialog.close();
+      });
       elements.confirmActions.append(button);
     });
-    dialog.addEventListener("close", () => finish(null), { once: true });
-    dialog.addEventListener("cancel", (event) => {
-      event.preventDefault();
-      finish(null);
-    }, { once: true });
+    dialog.returnValue = "";
+    dialog.addEventListener("close", onClose);
+    dialog.addEventListener("cancel", onCancel);
     dialog.showModal();
   });
 }
@@ -621,7 +631,11 @@ function openScanRecords(result, imageUrl, records) {
   elements.scanImage.src = imageUrl;
   elements.scanPreview.hidden = false;
   const motor = result.engine ? ` Motor: ${result.engine}.` : "";
-  elements.scanNote.textContent = `Reconocí ${scanRecords.length} registros. Confianza de lectura: ${result.confidence}%.${motor}`;
+  const imageCount = Number(result.image_count) || 1;
+  const origin = imageCount > 1
+    ? ` a partir de ${imageCount} imágenes (vista previa de la primera)`
+    : "";
+  elements.scanNote.textContent = `Reconocí ${scanRecords.length} registros${origin}. Confianza de lectura: ${result.confidence}%.${motor}`;
   const warnings = result.warnings || [];
   const incomplete = records.filter((record) => (record.warnings || []).length > 0).length;
   if (warnings.length) {
@@ -1002,11 +1016,12 @@ async function handleCsvFile(file) {
 const OCR_ACCEPTED = /\.(png|jpe?g|tiff?|bmp|webp|gif|heic|heif|avif)$/i;
 const OCR_MAX_BYTES = 20 * 1024 * 1024;
 let ocrStatusCache;
+let ocrBusy = false;
 
 function setOcrBusy(busy, message) {
   const hint = document.querySelector("#ocr-loader-hint");
   if (hint) {
-    hint.textContent = message || "Leé una ficha escaneada y se completan los campos.";
+    hint.textContent = message || "Leé una o varias fichas escaneadas y se completan los campos.";
   }
   document
     .querySelectorAll('label.button[for="ocr-input"], label.button[for="ocr-dialog-input"]')
@@ -1059,14 +1074,45 @@ async function getOcrStatus() {
   return ocrStatusCache;
 }
 
-async function handleOcrFile(file) {
-  const imageUrl = URL.createObjectURL(file);
+function combineOcrResults(successes) {
+  const records = [];
+  const warnings = [];
+  const engines = new Set();
+  let confidenceTotal = 0;
+  successes.forEach((success) => {
+    const result = success.result || {};
+    if (result.engine) engines.add(result.engine);
+    confidenceTotal += Number(result.confidence) || 0;
+    (result.warnings || []).forEach((warning) => {
+      if (!warnings.includes(warning)) warnings.push(warning);
+    });
+    (success.records || []).forEach((record) => records.push(record));
+  });
+  return {
+    engine: [...engines].join("+") || "OCR",
+    confidence: successes.length ? Math.round(confidenceTotal / successes.length) : 0,
+    records,
+    warnings,
+    image_count: successes.length,
+  };
+}
+
+async function handleOcrFiles(fileList) {
+  const files = Array.from(fileList || []).filter(Boolean);
+  if (!files.length || ocrBusy) return;
+  ocrBusy = true;
+
   if (elements.dialog.open) elements.formError.hidden = true;
   hideOcrAlert();
-  setOcrBusy(true, "Escaneando la imagen…");
-  showToast("Escaneando la imagen… puede tardar unos segundos.");
+  hideScanAlert();
+  resetOcrPreview();
+  resetScanPreview();
+
+  const createdUrls = [];
+  const successes = [];
+  const failures = [];
+
   try {
-    validateImageFile(file);
     const status = await getOcrStatus();
     if (status && status.available === false) {
       throw httpError(
@@ -1074,16 +1120,79 @@ async function handleOcrFile(file) {
         503,
       );
     }
-    const formData = new FormData();
-    formData.append("file", file);
-    const result = await apiRequest("/api/ocr/scan", { method: "POST", body: formData });
-    showOcrSuggestion(result, imageUrl);
-    const recognized = Array.isArray(result.records) ? result.records.length : 1;
-    logActivity(`Escaneo OCR: ${recognized} registro(s) reconocido(s).`, "info");
+
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const progress = `Escaneando imagen ${index + 1} de ${files.length}…`;
+      setOcrBusy(true, progress);
+      showToast(`${progress} puede tardar unos segundos.`);
+      try {
+        validateImageFile(file);
+        const formData = new FormData();
+        formData.append("file", file);
+        const result = await apiRequest("/api/ocr/scan", { method: "POST", body: formData });
+        const records = Array.isArray(result.records) && result.records.length
+          ? result.records
+          : [result];
+        const imageUrl = URL.createObjectURL(file);
+        createdUrls.push(imageUrl);
+        successes.push({ result, records, imageUrl });
+      } catch (error) {
+        failures.push({ file, error });
+      }
+    }
+
+    if (!successes.length) {
+      const first = failures[0];
+      const message = failures.length > 1
+        ? `${failures.length} imágenes no se pudieron leer. ${first.error.message}`
+        : first.error.message;
+      throw httpError(message, first.error.status || 422);
+    }
+
+    const combined = combineOcrResults(successes);
+    const failedNames = failures.map((failure) => failure.file.name).filter(Boolean).join(", ");
+    if (failures.length) {
+      const detail = failedNames
+        ? `${failures.length} imagen(es) no se pudieron leer: ${failedNames}.`
+        : `${failures.length} imagen(es) no se pudieron leer.`;
+      combined.warnings.push(detail);
+    }
+
+    if (!combined.records.length) {
+      throw httpError("No se reconocieron registros en las imágenes seleccionadas.", 422);
+    }
+
+    const preferred = combined.records.length === 1
+      ? successes.find((success) => success.records.length === 1) || successes[0]
+      : successes[0];
+
+    createdUrls.forEach((imageUrl) => {
+      if (imageUrl !== preferred.imageUrl) URL.revokeObjectURL(imageUrl);
+    });
+
+    if (combined.records.length === 1) {
+      const single = combined.records[0];
+      showOcrSuggestion(
+        { ...combined, records: [single] },
+        preferred.imageUrl,
+      );
+    } else {
+      openScanRecords(combined, preferred.imageUrl, combined.records);
+    }
+
+    logActivity(
+      `Escaneo OCR: ${successes.length} imagen(es), ${combined.records.length} registro(s) reconocido(s).`,
+      failures.length ? "warn" : "info",
+    );
+    if (failedNames) {
+      showToast(`Se leyeron ${successes.length} imagen(es). No se pudieron leer: ${failedNames}.`);
+    }
   } catch (error) {
-    URL.revokeObjectURL(imageUrl);
+    createdUrls.forEach((imageUrl) => URL.revokeObjectURL(imageUrl));
     reportOcrError(error);
   } finally {
+    ocrBusy = false;
     setOcrBusy(false);
     elements.ocrInput.value = "";
     elements.ocrDialogInput.value = "";
@@ -1264,12 +1373,12 @@ elements.csvInput.addEventListener("change", () => {
   if (file) handleCsvFile(file);
 });
 elements.ocrInput.addEventListener("change", () => {
-  const [file] = elements.ocrInput.files;
-  if (file) handleOcrFile(file);
+  const files = [...elements.ocrInput.files];
+  if (files.length) handleOcrFiles(files);
 });
 elements.ocrDialogInput.addEventListener("change", () => {
-  const [file] = elements.ocrDialogInput.files;
-  if (file) handleOcrFile(file);
+  const files = [...elements.ocrDialogInput.files];
+  if (files.length) handleOcrFiles(files);
   elements.ocrDialogInput.value = "";
 });
 

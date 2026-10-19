@@ -51,12 +51,13 @@ La interfaz abre en tema oscuro. El botón de sol/luna permite cambiar al tema c
 
 Para digitalizar fichas escaneadas sin transcribirlas a mano, el panel usa por defecto un **modelo de visión de DeepSeek** (`deepseek-flash`) a través de su API compatible con OpenAI. El modelo transcribe la imagen completa y el resultado se interpreta como propuestas de registro. Como respaldo local se mantiene [TrOCR](https://huggingface.co/microsoft/trocr-base-handwritten) (`microsoft/trocr-base-handwritten`), que lee **escritura manuscrita e impresa** segmentando la imagen en renglones.
 
-1. Elegí **Leer imagen (OCR)** en la barra del panel, o **Cargar imagen** dentro del formulario de registro, y seleccioná una foto o escaneo (PNG, JPG, TIFF, BMP, WEBP, GIF, y HEIC/AVIF para fotos de celular; hasta 20 MB).
-2. La API reencoda la imagen a JPEG y la envía al modelo de visión de DeepSeek con una consigna que devuelve **una línea por libro**, con los campos `Nº de inventario | Autor | Título | Encuadernación | Pie de imprenta`.
-3. El texto reconocido se divide en una propuesta por cada fila.
-4. Según cuántas fichas haya:
+1. Elegí **Leer imágenes (OCR)** en la barra del panel, o **Cargar imágenes** dentro del formulario de registro, y seleccioná **una o varias** fotos o escaneos (PNG, JPG, TIFF, BMP, WEBP, GIF, y HEIC/AVIF para fotos de celular; hasta 20 MB cada una). Las imágenes se escanean en orden y se muestra el progreso (`imagen 1 de N`).
+2. La API reencoda cada imagen a JPEG y la envía al modelo de visión de DeepSeek con una consigna que devuelve **una línea por libro**, con los campos `Nº de inventario | Autor | Título | Encuadernación | Pie de imprenta`.
+3. El texto reconocido de **todas las imágenes** se divide en una propuesta por cada fila y se combina en una sola lista.
+4. Según cuántas fichas haya en total:
    - **Una sola ficha:** se abre el formulario **Agregar registro** con los campos reconocidos y la imagen de referencia.
-    - **Varias fichas (multiregistro):** se abre el panel **Registros detectados**, con la imagen y una fila editable por cada libro; corregís lo que haga falta y guardás todo junto con `POST /api/books/bulk`.
+    - **Varias fichas (multiregistro):** se abre el panel **Registros detectados**, con la vista previa de la primera imagen y una fila editable por cada libro (aunque provengan de imágenes distintas); corregís lo que haga falta y guardás todo junto con `POST /api/books/bulk`.
+   - Si alguna imagen no se puede leer (por ejemplo, no parece una planilla de inventario), se omite y se avisa al final; las demás se procesan igual.
 5. Revisá y corregí los campos, y guardá. **El OCR nunca escribe en la base por su cuenta**: solo propone valores.
 
 Si una ficha tiene varios números de inventario (un rango como `62-72` o una lista como `62, 65, 78`), el formulario los carga **todos**; el campo acepta números sueltos separados por comas y rangos. Un mismo registro bibliográfico puede tener muchos ejemplares.
