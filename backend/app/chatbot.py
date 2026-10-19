@@ -2,13 +2,13 @@
 
 El contexto se arma con los registros activos de la base (título, autor, pie de
 imprenta, encuadernación y números de inventario). El proveedor configurado en
-``CHATBOT_*`` (por defecto Google Gemini) responde usando **solo** esos datos: si
+``CHATBOT_*`` (por defecto **DeepSeek**) responde usando **solo** esos datos: si
 el libro no está en el catálogo, o la pregunta no se entiende, lo dice en lugar
 de inventar una respuesta.
 
-Si el proveedor principal se queda sin tokens/saldo (cuota agotada, ``429``,
-``402``, ``403`` o error de red), el asistente reintenta automáticamente con
-**DeepSeek** usando ``DEEPSEEK_API_KEY``, para no dejar el ChatBot sin respuesta.
+Si se configura otro proveedor en ``CHATBOT_*`` y se queda sin tokens/saldo
+(cuota agotada, ``429``, ``402``, ``403`` o error de red), el asistente reintenta
+automáticamente con **DeepSeek** usando ``DEEPSEEK_API_KEY``.
 """
 
 from __future__ import annotations
@@ -39,13 +39,13 @@ def _setting(name: str, default: str = "") -> str:
     return str(value).strip()
 
 
-# Por defecto el ChatBot usa Google Gemini (endpoint compatible con OpenAI). Se
-# puede cambiar con CHATBOT_MODEL/CHATBOT_BASE_URL/CHATBOT_API_KEY para apuntar a
-# cualquier proveedor OpenAI-compatible. Si CHATBOT_* queda en blanco, se usa
-# DeepSeek con las variables DEEPSEEK_*. Ante falta de tokens/saldo del
-# proveedor principal, se reintenta con DeepSeek (DEEPSEEK_API_KEY) como respaldo.
-DEFAULT_CHAT_MODEL = "gemini-2.5-flash"
-DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+# `deepseek-chat` es el modelo de chat más económico de la API (sin cadena de
+# razonamiento). Se puede cambiar con CHATBOT_MODEL (o DEEPSEEK_CHAT_MODEL); con
+# CHATBOT_API_KEY/CHATBOT_BASE_URL se puede apuntar a cualquier proveedor
+# OpenAI-compatible. Ante falta de tokens/saldo del proveedor principal, se
+# reintenta con DeepSeek (DEEPSEEK_API_KEY) como respaldo.
+DEFAULT_CHAT_MODEL = "deepseek-chat"
+DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_DEFAULT_CHAT_MODEL = "deepseek-chat"
 DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com"
 MAX_CONTEXT_CHARS = 48_000

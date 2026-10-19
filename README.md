@@ -74,9 +74,9 @@ Configuración en `.env`:
 | `DEEPSEEK_BASE_URL` | URL base de la API; por defecto `https://api.deepseek.com`. |
 | `DEEPSEEK_MODEL` | Modelo de visión del OCR; por defecto `deepseek-flash`. |
 | `DEEPSEEK_CHAT_MODEL` | Modelo del ChatBot si `CHATBOT_*` está en blanco; por defecto `deepseek-chat`. |
-| `CHATBOT_API_KEY` | Clave del proveedor del ChatBot. Para Gemini, una clave `AIza…`. |
-| `CHATBOT_BASE_URL` | URL base OpenAI-compatible del ChatBot; por defecto la de Gemini (`https://generativelanguage.googleapis.com/v1beta/openai/`). |
-| `CHATBOT_MODEL` | Modelo de chat; por defecto `gemini-2.5-flash`. |
+| `CHATBOT_API_KEY` | Clave del proveedor del ChatBot. Si se deja vacía, usa `DEEPSEEK_API_KEY`. |
+| `CHATBOT_BASE_URL` | URL base OpenAI-compatible del ChatBot; por defecto `https://api.deepseek.com`. |
+| `CHATBOT_MODEL` | Modelo de chat; por defecto `deepseek-chat`. |
 | `LIBRARY_CONTEXT_DIR` | Carpeta con la base de conocimiento institucional; por defecto `./Entrevistas_Contexto`. |
 | `TROCR_MODEL` | Modelo local de respaldo en Hugging Face; por defecto `microsoft/trocr-base-handwritten`. |
 
@@ -92,7 +92,7 @@ La primera lectura con TrOCR puede tardar más porque carga el modelo en memoria
 
 ## ChatBot del inventario
 
-En el menú principal, debajo de **Inventario**, está **ChatBot**: un asistente que responde preguntas sobre el catálogo y sobre el funcionamiento interno de la biblioteca en lenguaje natural. Antes de cada consulta, la API arma un **resumen** del inventario (registros, ejemplares y rango de inventario) y un listado compacto de las fichas (`INV-000062 | «Título» | Autor | Pie de imprenta | Encuadernación`). Ese contexto más la **base de conocimiento institucional** se envían a un proveedor OpenAI-compatible —por defecto **Google Gemini** con `gemini-2.5-flash`— y el asistente responde **solo con esos datos**.
+En el menú principal, debajo de **Inventario**, está **ChatBot**: un asistente que responde preguntas sobre el catálogo y sobre el funcionamiento interno de la biblioteca en lenguaje natural. Antes de cada consulta, la API arma un **resumen** del inventario (registros, ejemplares y rango de inventario) y un listado compacto de las fichas (`INV-000062 | «Título» | Autor | Pie de imprenta | Encuadernación`). Ese contexto más la **base de conocimiento institucional** se envían a un proveedor OpenAI-compatible —por defecto **DeepSeek** con `deepseek-chat`— y el asistente responde **solo con esos datos**.
 
 - **Formato:** el asistente responde en Markdown con un tono humano; el panel lo **renderiza** (negritas, viñetas y **tablas**), así que para listar varios libros muestra una tabla con `Nº inv.` y `Título`.
 - **Inventario:** responde por título, autor, pie de imprenta o número de inventario; también puede contar registros y ejemplares.
@@ -101,15 +101,15 @@ En el menú principal, debajo de **Inventario**, está **ChatBot**: un asistente
 - No inventa disponibilidad ni préstamos: del ejemplar solo se conoce la encuadernación u observaciones. Si las normas internas y el inventario se contradicen sobre disponibilidad, prioriza el inventario.
 - La conversación recentísima se envía como historial para dar contexto, y se mantiene **en el navegador**: al recargar o pulsar **Limpiar chat** se reinicia.
 - Si falta la API key (`CHATBOT_API_KEY` o `DEEPSEEK_API_KEY`), `GET /api/chat/status` devuelve `available: false` y el panel lo avisa.
-- Por defecto el ChatBot usa **Google Gemini** (`gemini-2.5-flash`): pegá tu clave `AIza…` en `CHATBOT_API_KEY`. El OCR sigue usando DeepSeek.
-- **Respaldo automático:** si el proveedor principal se queda **sin tokens o saldo** (cuota agotada, `429`, `402`, `403` o fallo de red), el ChatBot reintenta en el acto con **DeepSeek** usando `DEEPSEEK_API_KEY`; el campo `model` de la respuesta indica qué proveedor contestó. `GET /api/chat/status` informa el respaldo en `fallback_model`.
+- Por defecto el ChatBot usa **DeepSeek** (`deepseek-chat`) con `DEEPSEEK_API_KEY`, la misma clave que usa el OCR.
+- **Respaldo automático:** si configurás otro proveedor en `CHATBOT_*` y se queda **sin tokens o saldo** (cuota agotada, `429`, `402`, `403` o fallo de red), el ChatBot reintenta en el acto con **DeepSeek** usando `DEEPSEEK_API_KEY`; el campo `model` de la respuesta indica qué proveedor contestó. `GET /api/chat/status` informa el respaldo en `fallback_model`.
 - El ChatBot puede usar **cualquier proveedor compatible con OpenAI** cambiando `CHATBOT_API_KEY`, `CHATBOT_BASE_URL` y `CHATBOT_MODEL`. Si dejás `CHATBOT_*` en blanco, usa DeepSeek con `deepseek-chat`.
 
 ### Base de conocimiento institucional
 
 Todo archivo `.md`, `.markdown` o `.txt` que esté en la carpeta `Entrevistas_Contexto/` se concatena y se envía como contexto estable (lo que además aprovecha el caché de prompt del proveedor). Para sumar una nueva entrevista o normativa, dejá el archivo en esa carpeta (por ejemplo `EntrevistaV2.md`): se toma automáticamente al reiniciar la API, sin cambios de código. El directorio se puede cambiar con la variable `LIBRARY_CONTEXT_DIR`.
 
-`GET /api/chat/status` informa `context_files` con la cantidad de archivos cargados y `fallback_model` con el respaldo DeepSeek (si está configurado). `POST /api/chat` recibe `{ "message": "...", "history": [{ "role": "user|assistant", "content": "..." }] }` y devuelve `{ "reply": "...", "model": "gemini-2.5-flash" }`; si el principal se queda sin tokens, `model` será `deepseek-chat`. El asistente **no modifica** la base: solo lee el catálogo y el contexto.
+`GET /api/chat/status` informa `context_files` con la cantidad de archivos cargados y `fallback_model` con el respaldo DeepSeek (si está configurado). `POST /api/chat` recibe `{ "message": "...", "history": [{ "role": "user|assistant", "content": "..." }] }` y devuelve `{ "reply": "...", "model": "deepseek-chat" }`; si configuraste otro proveedor y se queda sin tokens, el modelo indicará el que contestó. El asistente **no modifica** la base: solo lee el catálogo y el contexto.
 
 > Nota: la ficha institucional V1 menciona que el catálogo no está digitalizado. En este sistema, la disponibilidad se responde con el inventario en vivo, que es la fuente prioritaria.
 

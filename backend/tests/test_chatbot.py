@@ -176,9 +176,9 @@ def test_chat_answers_using_inventory_context(monkeypatch, tmp_path) -> None:
 
 
 def test_chat_providers_add_deepseek_fallback(monkeypatch) -> None:
-    monkeypatch.setattr(chatbot, "_api_key", lambda: "gemini-key")
-    monkeypatch.setattr(chatbot, "_base_url", lambda: "https://gemini.test")
-    monkeypatch.setattr(chatbot, "_chat_model", lambda: "gemini-2.5-flash")
+    monkeypatch.setattr(chatbot, "_api_key", lambda: "primary-key")
+    monkeypatch.setattr(chatbot, "_base_url", lambda: "https://primary.test")
+    monkeypatch.setattr(chatbot, "_chat_model", lambda: "primary-model")
     monkeypatch.setattr(
         chatbot,
         "_deepseek_provider",
@@ -192,7 +192,7 @@ def test_chat_providers_add_deepseek_fallback(monkeypatch) -> None:
 
     models = [provider["model"] for provider in chatbot.chat_providers()]
 
-    assert models == ["gemini-2.5-flash", "deepseek-chat"]
+    assert models == ["primary-model", "deepseek-chat"]
 
 
 def test_chat_providers_skip_duplicate_fallback(monkeypatch) -> None:
@@ -214,13 +214,13 @@ def test_chat_providers_skip_duplicate_fallback(monkeypatch) -> None:
 
 
 def test_chat_falls_back_when_primary_runs_out_of_tokens(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(chatbot, "_api_key", lambda: "gemini-key")
+    monkeypatch.setattr(chatbot, "_api_key", lambda: "primary-key")
     providers = [
         {
             "name": "principal",
-            "api_key": "gemini-key",
-            "base_url": "https://gemini.test",
-            "model": "gemini-2.5-flash",
+            "api_key": "primary-key",
+            "base_url": "https://primary.test",
+            "model": "primary-model",
         },
         {
             "name": "DeepSeek",
@@ -242,7 +242,7 @@ def test_chat_falls_back_when_primary_runs_out_of_tokens(monkeypatch, tmp_path) 
 
     def fake_post(url, headers=None, json=None, timeout=None):
         calls.append(url)
-        if "gemini" in url:
+        if "primary" in url:
             return FakeResponse(429, "quota exceeded")
         return FakeResponse(200, "Hay 2 ejemplares.")
 
