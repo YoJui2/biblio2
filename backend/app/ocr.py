@@ -59,14 +59,20 @@ CONFIDENCE_THRESHOLD = 70.0
 _BASE_FORMATS = "PNG, JPG, TIFF, BMP, WEBP o GIF"
 SUPPORTED_FORMATS = _BASE_FORMATS + (", HEIC o AVIF" if _HEIF_AVAILABLE else "")
 
+NOT_INVENTORY_MARKER = "NO_ES_INVENTARIO"
 _DEEPSEEK_SYSTEM_PROMPT = (
     "Sos un transcriptor experto de fichas de inventario de biblioteca escritas a mano. "
     "Transcribí con fidelidad todo el texto visible de la imagen, respetando mayúsculas, "
-    "acentos y números de inventario, sin inventar ni resumir nada."
+    "acentos y números de inventario, sin inventar ni resumir nada. "
+    "Si la imagen NO es una planilla o ficha de inventario de biblioteca (por ejemplo, "
+    "una foto personal, un paisaje, un comprobante o una captura de pantalla), respondé "
+    f"exactamente {NOT_INVENTORY_MARKER} y nada más."
 )
 _DEEPSEEK_USER_PROMPT = (
-    "La imagen es una planilla de inventario de biblioteca con una fila por libro. "
-    "Transcribí TODAS las filas, sin omitir ninguna y sin inventar datos.\n"
+    "Analizá la imagen. Si NO es una planilla o ficha de inventario de biblioteca, "
+    f"respondé únicamente {NOT_INVENTORY_MARKER}.\n"
+    "Si SÍ lo es, la imagen tiene una fila por libro: transcribí TODAS las filas, sin "
+    "omitir ninguna y sin inventar datos.\n"
     "Devolvé una línea por libro, sin encabezados, sin numeración de fila y sin bloques "
     "de código, con los campos en este orden separados por \" | \":\n"
     "Nº de inventario | Autor | Título | Encuadernación | Pie de imprenta\n"
@@ -365,6 +371,43 @@ def interpret_ocr_records_text(text: str) -> list[dict[str, object]]:
             }
         )
     return records
+
+
+def _plausible_inventory_number(number: object) -> bool:
+    try:
+        value = int(number)
+    except (TypeError, ValueError):
+        return False
+    return 0 < value <= 9_999_999
+
+
+def looks_like_inventory_records(records: list[dict[str, object]]) -> bool:
+    """True si al menos una fila parece una ficha real del inventario.
+
+    Exigimos un número de inventario válido y contenido bibliográfico (título o
+    autor). Así se rechazan fotos, comprobantes y capturas que no corresponden
+    al formato de la planilla.
+    """
+
+    for record in records or []:
+        numbers = [
+            number
+            for number in (record.get("inventory_numbers") or [])
+            if _plausible_inventory_number(number)
+        ]
+        title = str(record.get("title") or "").strip()
+        author = str(record.get("author") or "").strip()
+        if numbers and (title or author):
+            return True
+    return False
+
+
+def _reject_not_inventory() -> None:
+    raise OcrError(
+        "La imagen no parece una planilla o ficha de inventario de biblioteca. "
+        "Subí una foto o escaneo donde se vean los números de inventario, el autor "
+        "y el título de los libros."
+    )
 
 
 def _get_model():
@@ -698,6 +741,15 @@ def _scan_with_deepseek(data: bytes) -> dict[str, object]:
         raise OcrError("La respuesta de DeepSeek no tuvo el formato esperado.") from error
 
     records = interpret_ocr_records_text(raw_text)
+    has_structured_rows = bool(_split_record_rows(raw_text))
+    if (
+        NOT_INVENTORY_MARKER in raw_text.upper()
+        or not has_structured_rows
+        or not looks_like_inventory_records(records)
+    ):
+        logger.info("OCR DeepSeek: se rechazó la imagen por no parecer del formato de inventario.")
+        _reject_not_inventory()
+
     confidence = 100.0 if raw_text else 0.0
     logger.info(
         "OCR DeepSeek (%s): %d línea(s), %d registro(s) reconocido(s).",
@@ -775,6 +827,9 @@ def _scan_with_trocr(data: bytes) -> dict[str, object]:
     raw_text = "\n".join(lines)
     confidence = sum(confidences) / len(confidences) if confidences else 0.0
     result = interpret_ocr_text(raw_text)
+    if not looks_like_inventory_records([result]):
+        logger.info("OCR TrOCR: se rechazó la imagen por no parecer del formato de inventario.")
+        _reject_not_inventory()
     width, height = best_oriented.size
     logger.info(
         "OCR: %d segmento(s), %d línea(s), confianza media %.1f%%",

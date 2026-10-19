@@ -86,6 +86,7 @@ La primera lectura con TrOCR puede tardar más porque carga el modelo en memoria
 
 - Formatos admitidos: PNG, JPG, TIFF, BMP, WEBP, GIF y, si `pillow-heif` está instalado, HEIC/HEIF y AVIF (fotos de celular). Consultá la lista en `GET /api/ocr/status` (campo `formats`).
 - Formato no reconocido o imagen ilegible: `422` con un mensaje concreto en el formulario.
+- **Imagen que no parece una planilla o ficha de inventario** (una foto, un paisaje, un comprobante, una captura): se **rechaza** con `422`; el OCR exige al menos una fila con número de inventario y título o autor.
 - Archivo que no es imagen: `400`. Imagen mayor a 20 MB: `413`.
 - Modelo o dependencias ausentes en el servidor: `503` (`GET /api/ocr/status` devuelve `available: false` y el detalle); el panel avisa que hay que recompilar la API (`docker compose build --no-cache api && docker compose up -d`).
 - Si la API no responde, el panel muestra "No se pudo conectar con el servidor" en lugar del error crudo del navegador, y recuerda abrir el panel desde `http://localhost:8000/`.

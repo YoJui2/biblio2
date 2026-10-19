@@ -1,7 +1,15 @@
+import httpx
+import pytest
+
 from fastapi.testclient import TestClient
 
+from app import ocr
 from app.main import create_app
-from app.ocr import interpret_ocr_records_text, interpret_ocr_text
+from app.ocr import (
+    interpret_ocr_records_text,
+    interpret_ocr_text,
+    looks_like_inventory_records,
+)
 
 
 def make_client(tmp_path) -> TestClient:
@@ -85,6 +93,62 @@ def test_interpret_warns_when_nothing_is_recognized() -> None:
 
     assert result["inventory_numbers"] == []
     assert len(result["warnings"]) == 3
+
+
+def test_looks_like_inventory_accepts_real_record() -> None:
+    records = interpret_ocr_records_text("62 | María López | Matemática 6 | Cartoné | Estrada, 2010")
+
+    assert looks_like_inventory_records(records) is True
+
+
+def test_looks_like_inventory_rejects_record_without_numbers() -> None:
+    records = interpret_ocr_records_text(" | | Un paisaje al atardecer | | ")
+
+    assert looks_like_inventory_records(records) is False
+
+
+def test_looks_like_inventory_rejects_record_without_title_and_author() -> None:
+    records = interpret_ocr_records_text("62 | | | | ")
+
+    assert looks_like_inventory_records(records) is False
+
+
+def test_looks_like_inventory_rejects_empty_result() -> None:
+    assert looks_like_inventory_records(interpret_ocr_records_text("   \n  ")) is False
+
+
+def test_deepseek_scan_rejects_non_inventory_image(monkeypatch) -> None:
+    monkeypatch.setattr(ocr, "_deepseek_api_key", lambda: "test-key")
+    monkeypatch.setattr(ocr, "_encode_image_for_api", lambda data: ("encoded", 100, 100))
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": ocr.NOT_INVENTORY_MARKER}}]}
+
+    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: FakeResponse())
+
+    with pytest.raises(ocr.OcrError, match="no parece una planilla"):
+        ocr._scan_with_deepseek(b"imagen")
+
+
+def test_deepseek_scan_rejects_unrecognized_text(monkeypatch) -> None:
+    monkeypatch.setattr(ocr, "_deepseek_api_key", lambda: "test-key")
+    monkeypatch.setattr(ocr, "_encode_image_for_api", lambda data: ("encoded", 100, 100))
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": "Una foto del atardecer"}}]}
+
+    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: FakeResponse())
+
+    with pytest.raises(ocr.OcrError, match="no parece una planilla"):
+        ocr._scan_with_deepseek(b"imagen")
 
 
 def test_ocr_status_reports_availability(tmp_path) -> None:
