@@ -53,6 +53,29 @@ def test_health_and_crud_preserve_unique_inventory_numbers(client: TestClient) -
     assert client.get("/api/books").json() == []
 
 
+def test_create_record_allows_missing_fields(client: TestClient) -> None:
+    response = client.post("/api/books", json={})
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["title"] == ""
+    assert body["author"] == ""
+    assert body["inventory_numbers"] == []
+    assert len(client.get("/api/books").json()) == 1
+
+
+def test_bulk_create_allows_incomplete_records(client: TestClient) -> None:
+    payload = [
+        {"title": "", "author": "", "inventory_numbers": []},
+        {"title": "Solo título"},
+    ]
+
+    response = client.post("/api/books/bulk", json=payload)
+
+    assert response.status_code == 201
+    assert response.json() == {"records": 2, "copies": 0, "skipped": 0}
+
+
 def test_delete_all_records_clears_catalog(client: TestClient) -> None:
     payload = {
         "title": "Libro de prueba",

@@ -641,7 +641,7 @@ function openScanRecords(result, imageUrl, records) {
   if (warnings.length) {
     showScanAlert(`Revisá antes de guardar: ${warnings.join(" ")}`);
   } else if (incomplete) {
-    showScanAlert(`${incomplete} fila(s) tienen datos incompletos; completá lo que falte.`);
+    showScanAlert(`${incomplete} fila(s) tienen datos incompletos; podés completarlos o guardarlos igual con confirmación.`);
   } else {
     hideScanAlert();
   }
@@ -660,20 +660,27 @@ async function saveScanRecords() {
   }
   const payload = [];
   const problems = [];
+  const incomplete = [];
   rows.forEach((row, index) => {
     const value = (field) => row.querySelector(`[data-field="${field}"]`).value.trim();
+    const inventory = value("inventory");
     const title = value("title");
     const author = value("author");
-    let numbers;
-    try {
-      numbers = parseInventoryRange(value("inventory"));
-    } catch (error) {
-      problems.push(`Fila ${index + 1}: ${error.message}`);
-      return;
+    let numbers = [];
+    if (inventory) {
+      try {
+        numbers = parseInventoryRange(inventory);
+      } catch (error) {
+        problems.push(`Fila ${index + 1}: ${error.message}`);
+        return;
+      }
     }
-    if (!title || !author) {
-      problems.push(`Fila ${index + 1}: completá el título y el autor.`);
-      return;
+    const missing = [];
+    if (!inventory) missing.push("N° inv.");
+    if (!title) missing.push("título");
+    if (!author) missing.push("autor");
+    if (missing.length) {
+      incomplete.push(`Fila ${index + 1}: ${missing.join(", ")}.`);
     }
     payload.push({
       title,
@@ -688,6 +695,20 @@ async function saveScanRecords() {
     elements.scanError.innerHTML = problems.map((message) => escapeHTML(message)).join("<br />");
     elements.scanError.hidden = false;
     return;
+  }
+  if (incomplete.length) {
+    const preview = incomplete.slice(0, 4).join(" ");
+    const extra = incomplete.length > 4 ? ` y ${incomplete.length - 4} fila(s) más.` : "";
+    const confirmed = await confirmAction(
+      `${incomplete.length} fila(s) tienen datos faltantes. ${preview}${extra} ¿Querés guardarlas igual?`,
+      {
+        title: "Datos incompletos",
+        eyebrow: "REVISAR",
+        confirmLabel: "Guardar igual",
+        tone: "danger",
+      },
+    );
+    if (!confirmed) return;
   }
   const seen = new Set();
   const duplicates = new Set();
@@ -763,18 +784,31 @@ async function handleSubmit(event) {
   const inventoryRange = String(data.get("inventoryRange")).trim();
   const title = String(data.get("title")).trim();
   const author = String(data.get("author")).trim();
-  let inventoryNumbers;
-  try {
-    inventoryNumbers = parseInventoryRange(inventoryRange);
-  } catch (error) {
-    elements.formError.textContent = error.message;
-    elements.formError.hidden = false;
-    return;
+  let inventoryNumbers = [];
+  if (inventoryRange) {
+    try {
+      inventoryNumbers = parseInventoryRange(inventoryRange);
+    } catch (error) {
+      elements.formError.textContent = error.message;
+      elements.formError.hidden = false;
+      return;
+    }
   }
-  if (!title || !author) {
-    elements.formError.textContent = "Completá el número de inventario, el título y el autor.";
-    elements.formError.hidden = false;
-    return;
+  const missing = [];
+  if (!inventoryRange) missing.push("número de inventario");
+  if (!title) missing.push("título");
+  if (!author) missing.push("autor");
+  if (missing.length) {
+    const confirmed = await confirmAction(
+      `Faltan estos datos: ${missing.join(", ")}. El registro se guardará incompleto. ¿Querés continuar?`,
+      {
+        title: "Datos incompletos",
+        eyebrow: "REVISAR",
+        confirmLabel: "Guardar igual",
+        tone: "danger",
+      },
+    );
+    if (!confirmed) return;
   }
   const updated = {
     title,

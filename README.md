@@ -156,7 +156,7 @@ Al exportar, el panel escribe los rangos con prefijos normalizados, por ejemplo 
 
 Las confirmaciones de acciones destructivas (eliminar, vaciar catálogo o papelera) también usan un cuadro **en pantalla**, no el `confirm` nativo del navegador.
 
-Agregar y editar valida los campos obligatorios y evita asignar números ya utilizados por otro registro **activo** (los que están en la papelera no cuentan). Al editar un rango, los números anteriores de ese registro se sustituyen por los nuevos; confirmá que el rango sea el correcto antes de guardar. Eliminar un registro lo mueve a la papelera (ver abajo); el borrado definitivo elimina en cascada sus ejemplares.
+Agregar y editar permite guardar aunque falten el número de inventario, el título o el autor: en ese caso aparece un cuadro **«Datos incompletos»** que pide confirmación («Guardar igual») antes de guardar. Lo mismo aplica a las filas del panel multiregistro de OCR. El formulario sigue validando que un número o rango, si se escribe, tenga formato válido, y evita asignar números ya utilizados por otro registro **activo** (los que están en la papelera no cuentan). Al editar un rango, los números anteriores de ese registro se sustituyen por los nuevos; confirmá que el rango sea el correcto antes de guardar. Eliminar un registro lo mueve a la papelera (ver abajo); el borrado definitivo elimina en cascada sus ejemplares.
 
 ## Papelera y borrado
 
@@ -205,7 +205,7 @@ Debajo del perfil del bibliotecario, al pie de la barra lateral, el botón **Act
 | Se confirma una importación mientras ya hay registros cargados | Se reemplaza el catálogo completo de MySQL en una transacción; no se mezclan filas ni se hace una actualización por título. | Exportá una copia antes si necesitás conservar el estado anterior. |
 | Se cancela la confirmación | No se cambia el catálogo. | No hace falta restaurar datos. |
 | Se edita el rango de un registro | Se reemplaza su conjunto de números; la validación impide conflictos con otros registros. | Una edición incorrecta podría liberar números que estaban asignados a ese registro. |
-| La imagen escaneada contiene varias fichas (multiregistro) | El OCR devuelve una propuesta por fila y el panel abre **Registros detectados**; al confirmar se guardan juntas con `POST /api/books/bulk`. | Corregí cada fila; si hay números repetidos **entre filas**, se rechaza el lote. |
+| La imagen escaneada contiene varias fichas (multiregistro) | El OCR devuelve una propuesta por fila y el panel abre **Registros detectados**; al confirmar se guardan juntas con `POST /api/books/bulk`. Si faltan datos, se pide confirmación y se guardan igual. | Corregí cada fila; si hay números repetidos **entre filas**, se rechaza el lote. |
 | Una o más filas del escaneo usan números ya asignados en el catálogo | Las filas en conflicto se **resaltan** y el panel pregunta qué hacer: **Omitir duplicados y guardar** (`on_conflict=skip`, guarda solo las filas nuevas e informa cuántas se omitieron) o **Cancelar y corregir**. | Corregí los números y volvé a guardar, o elegí omitir si querés cargar solo lo nuevo. |
 | Se escanea una imagen con un formato distinto al esperado | Si no hay filas con separadores `\|`, el intérprete cae al modo de un solo registro. | Revisá la propuesta; si vino mal, cargá los campos a mano o mejorá la toma. |
 | Se elimina un registro | Se mueve a la papelera; deja de contar en el catálogo. | Se puede restaurar o borrar definitivamente desde **Papelera**. |

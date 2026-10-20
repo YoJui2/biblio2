@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css?v=11" />
-    <script src="app.js?v=13" defer></script>
+    <script src="app.js?v=14" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -227,9 +227,9 @@
           <p class="ocr-note" id="ocr-note"></p>
         </div>
         <div class="form-grid">
-          <label class="form-field field-wide">N° de inventario <span class="required">*</span><input name="inventoryRange" required maxlength="40" placeholder="62 o 62-71" aria-describedby="inventory-help" /><span class="field-help" id="inventory-help">Se normaliza a INV-000062, INV-000063…</span></label>
-          <label class="form-field field-wide">Título <span class="required">*</span><input name="title" required maxlength="300" placeholder="Título tal como figura en el catálogo" /></label>
-          <label class="form-field field-wide">Autor/a <span class="required">*</span><input name="author" required maxlength="300" placeholder="Autor o autores" /></label>
+          <label class="form-field field-wide">N° de inventario<input name="inventoryRange" maxlength="40" placeholder="62 o 62-71" aria-describedby="inventory-help" /><span class="field-help" id="inventory-help">Se normaliza a INV-000062, INV-000063…</span></label>
+          <label class="form-field field-wide">Título<input name="title" maxlength="300" placeholder="Título tal como figura en el catálogo" /></label>
+          <label class="form-field field-wide">Autor/a<input name="author" maxlength="300" placeholder="Autor o autores" /></label>
           <label class="form-field field-wide">Pie de imprenta<input name="imprint" maxlength="300" placeholder="Lugar: editorial, año" /></label>
           <label class="form-field field-wide">Encuadernación / observaciones<input name="binding" maxlength="200" placeholder="Ej. Cartoné" /></label>
         </div>
@@ -260,7 +260,7 @@
     <dialog class="book-dialog scan-dialog" id="scan-dialog" aria-labelledby="scan-title">
       <div class="scan-body">
         <div class="dialog-header">
-          <div><p class="eyebrow"><span class="eyebrow-line"></span> OCR · MULTI-REGISTRO</p><h2 id="scan-title">Registros detectados</h2><p class="dialog-description">Revisá y corregí cada fila antes de guardarlas. El OCR no guarda nada por su cuenta.</p></div>
+          <div><p class="eyebrow"><span class="eyebrow-line"></span> OCR · MULTI-REGISTRO</p><h2 id="scan-title">Registros detectados</h2><p class="dialog-description">Revisá y corregí cada fila antes de guardarlas. Si falta algún dato, se pedirá confirmación. El OCR no guarda nada por su cuenta.</p></div>
           <button class="icon-button close-scan" type="button" aria-label="Cerrar">×</button>
         </div>
         <div class="ocr-preview scan-preview" id="scan-preview" hidden>

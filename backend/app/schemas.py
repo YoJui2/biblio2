@@ -5,20 +5,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class RecordFields(BaseModel):
-    title: str = Field(min_length=1, max_length=500)
-    author: str = Field(min_length=1, max_length=500)
+    title: str = Field(default="", max_length=500)
+    author: str = Field(default="", max_length=500)
     imprint: str = Field(default="", max_length=10000)
     binding: str = Field(default="", max_length=300)
-    inventory_numbers: list[int] = Field(min_length=1, max_length=10000)
+    inventory_numbers: list[int] = Field(default_factory=list, max_length=10000)
     inventory_source: str = Field(default="", max_length=120)
 
     @field_validator("title", "author")
     @classmethod
-    def required_text_is_not_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("Este campo no puede estar vacío.")
-        return value
+    def trim_text(cls, value: str) -> str:
+        return value.strip()
 
     @field_validator("inventory_numbers")
     @classmethod
