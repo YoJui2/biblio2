@@ -1,0 +1,45 @@
+flowchart LR
+  classDef user fill:#1f6f5c,stroke:#154c40,color:#ffffff
+  classDef ui fill:#e8f0ec,stroke:#9bb8ab,color:#1d2b26
+  classDef api fill:#f6efe2,stroke:#c9a86a,color:#3a2f1b
+  classDef data fill:#e7e9f5,stroke:#8f95c4,color:#23264a
+  classDef ext fill:#f3e6e6,stroke:#c08c8c,color:#4a2323
+  classDef warn fill:#fdf1d6,stroke:#d9a441,color:#5a3d0c
+
+  U(["Bibliotecario/a"]):::user
+  P["PANEL WEB<br/>inventario · búsqueda · formulario · chat"]:::ui
+
+  U --> P
+
+  subgraph L1["1 · CATÁLOGO"]
+    direction LR
+    A1["Agregar o editar<br/>Importar CSV<br/>Mover a papelera"]:::ui
+    API1["FastAPI<br/>valida datos y números<br/>guarda en una transacción"]:::api
+    DB[("MySQL<br/>registros + ejemplares")]:::data
+    A1 --> API1 --> DB
+  end
+
+  subgraph L2["2 · OCR"]
+    direction LR
+    A2["Subir fotos<br/>o escaneos"]:::ui
+    API2["FastAPI OCR<br/>/api/ocr/scan<br/>no guarda"]:::api
+    AI["DeepSeek Vision<br/>o TrOCR"]:::ext
+    PROP["Propuesta editable<br/>revisión humana"]:::warn
+    A2 --> API2 --> AI --> PROP
+  end
+
+  subgraph L3["3 · CONSULTA"]
+    direction LR
+    A3["Pregunta en<br/>lenguaje natural"]:::ui
+    API3["FastAPI ChatBot<br/>/api/chat<br/>solo lectura"]:::api
+    CTX["Lee MySQL +<br/>Entrevistas_Contexto"]:::data
+    LLM["DeepSeek Chat"]:::ext
+    RESP["Respuesta al panel"]:::ui
+    A3 --> API3 --> CTX --> LLM --> RESP
+  end
+
+  P --> A1
+  P --> A2
+  P --> A3
+
+  PROP -.->|"revisión humana"| API1
