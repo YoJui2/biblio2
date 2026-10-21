@@ -5,13 +5,14 @@ from typing import Annotated
 
 import csv
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app import chatbot, ocr
 from app.config import PROJECT_ROOT, Settings
+from app.export import build_catalog_workbook
 from app.db import Base, make_session_factory, session_dependency
 from app.inventory import (
     parse_inventory_csv,
@@ -92,6 +93,34 @@ def create_app(
             .order_by(BibliographicRecord.id)
         ).all()
         return [record_to_dict(record) for record in records]
+
+    @application.get("/api/export.xlsx", tags=["catálogo"])
+    def export_catalog_excel(
+        session: Annotated[Session, Depends(dependency)],
+        q: Annotated[str, Query()] = "",
+    ) -> Response:
+        records = session.scalars(
+            select(BibliographicRecord)
+            .where(BibliographicRecord.deleted_at.is_(None))
+            .options(selectinload(BibliographicRecord.copies))
+            .order_by(BibliographicRecord.id)
+        ).all()
+        content = build_catalog_workbook(
+            [record_to_dict(record) for record in records],
+            query=q,
+        )
+        suffix = "-filtrado" if q.strip() else ""
+        filename = f"inventario-biblioteca{suffix}-{datetime.now():%Y-%m-%d}.xlsx"
+        return Response(
+            content=content,
+            media_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+            },
+        )
 
     @application.post(
         "/api/books",

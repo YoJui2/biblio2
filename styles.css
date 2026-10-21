@@ -121,6 +121,9 @@ h2 { margin-bottom: 0; font-family: Manrope, sans-serif; font-size: 16px; font-w
 .button-export { min-height: 34px; padding: 0 11px; border-color: #e8eae5; background: white; color: #636860; font-size: 11px; }
 .button-export:hover { border-color: #cbd7ca; background: #f8faf7; }
 .button-export svg { width: 15px; height: 15px; }
+.button-excel { border-color: #c8dec9; background: #edf5ec; color: #356b48; }
+.button-excel:hover { border-color: #a9c8aa; background: #e3efe2; }
+.button-excel:disabled { opacity: .6; cursor: progress; }
 .button-danger { min-height: 34px; padding: 0 11px; border-color: #eccfcb; background: #fdf1ef; color: #a4453d; font-size: 11px; }
 .button-danger:hover { border-color: #d9a49e; background: #fbe6e2; }
 .button-danger svg { width: 15px; height: 15px; }
@@ -273,6 +276,8 @@ html[data-theme="dark"] .panel-subtitle { color: #929c93; }
 html[data-theme="dark"] .total-pill { background: #303832; color: #bbc3bb; }
 html[data-theme="dark"] .button-export { border-color: #3a443d; background: #252c28; color: #c4ccc4; }
 html[data-theme="dark"] .button-export:hover { border-color: #566b56; background: #2c352e; }
+html[data-theme="dark"] .button-excel { border-color: #4b6a50; background: #29372b; color: #b9d8b9; }
+html[data-theme="dark"] .button-excel:hover { border-color: #6b916c; background: #324433; }
 html[data-theme="dark"] .button-danger { border-color: #6a403c; background: #2e211f; color: #eaa79f; }
 html[data-theme="dark"] .button-danger:hover { border-color: #8a5a54; background: #3a2825; }
 html[data-theme="dark"] .search-box { border-color: #3a443d; background: #1c221f; color: #a0aaa1; }
@@ -325,7 +330,7 @@ html[data-theme="dark"] .toast { border-color: #3c5540; background: #253229; col
 
 html[data-theme] body, html[data-theme] .sidebar, html[data-theme] .topbar, html[data-theme] .stat-card,
 html[data-theme] .inventory-panel, html[data-theme] .book-dialog, html[data-theme] .button-export,
-html[data-theme] .search-box {
+html[data-theme] .button-excel, html[data-theme] .search-box {
   transition: background-color .2s ease, border-color .2s ease, color .2s ease;
 }
 

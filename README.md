@@ -29,6 +29,7 @@ MySQL solo es accesible desde la red interna de Docker; no se publica un puerto 
 | --- | --- | --- |
 | `GET` | `/api/health` | Comprueba la conexión a MySQL. |
 | `GET` | `/api/books` | Lista los registros y sus números de inventario individuales. |
+| `GET` | `/api/export.xlsx` | Descarga el catálogo en Excel con formato, resumen y hoja de ejemplares. Acepta `?q=` para exportar solo las filas que coinciden con la búsqueda. |
 | `POST` | `/api/books` | Crea un registro y sus ejemplares. |
 | `POST` | `/api/books/bulk` | Crea varios registros a la vez de forma atómica (un escaneo con varias fichas). Con `?on_conflict=skip` omite los registros cuyos números ya existen y devuelve `skipped` en lugar de rechazar todo el lote. |
 | `PUT` | `/api/books/{id}` | Actualiza un registro y su rango de ejemplares. |
@@ -143,6 +144,18 @@ Los extremos del rango son inclusivos. Un número no puede pertenecer a más de 
 
 Al exportar, el panel escribe los rangos con prefijos normalizados, por ejemplo `INV-000062-INV-000071`. La exportación incluye el filtro de búsqueda activo; borralo antes de exportar el catálogo completo.
 
+## Exportar el catálogo
+
+El botón **Exportar Excel** descarga un archivo `.xlsx` generado por la API (`GET /api/export.xlsx`), pensado para leer o compartir sin trabajo extra:
+
+- **Catálogo:** una fila por registro bibliográfico, con números de inventario compactados en rangos, título, autor, pie de imprenta, cantidad de ejemplares y encuadernación. Tiene encabezado verde, filas alternadas, columna de ejemplares con barra de datos, panel superior congelado y filtros automáticos.
+- **Resumen:** totales de registros y ejemplares, rango de inventario, promedio de ejemplares por registro, registros sin número, filtro aplicado y fecha de generación; además, rankings de autores con más registros y títulos con más ejemplares.
+- **Ejemplares:** una fila por cada número de inventario (`INV-000001`, `INV-000002`, …) con su título, autor, pie de imprenta y observaciones, ordenada por número y con filtros.
+
+Las tres hojas están preparadas para imprimir en A4 (orientación y repetición de encabezados). Si hay una búsqueda activa, el archivo incluye solo las filas visibles, lo indica en el subtítulo y agrega el sufijo `-filtrado` al nombre. **Exportar CSV** sigue disponible para el intercambio simple con la planilla original.
+
+La exportación a Excel usa `openpyxl`; si la API corre en Docker, reconstruila una vez con `docker compose build api && docker compose up -d` para instalar la dependencia.
+
 ## Importación y reemplazos
 
 1. Elegí **Importar CSV** y seleccioná el archivo.
@@ -209,7 +222,7 @@ Debajo del perfil del bibliotecario, al pie de la barra lateral, el botón **Act
 | Una o más filas del escaneo usan números ya asignados en el catálogo | Las filas en conflicto se **resaltan** y el panel pregunta qué hacer: **Omitir duplicados y guardar** (`on_conflict=skip`, guarda solo las filas nuevas e informa cuántas se omitieron) o **Cancelar y corregir**. | Corregí los números y volvé a guardar, o elegí omitir si querés cargar solo lo nuevo. |
 | Se escanea una imagen con un formato distinto al esperado | Si no hay filas con separadores `\|`, el intérprete cae al modo de un solo registro. | Revisá la propuesta; si vino mal, cargá los campos a mano o mejorá la toma. |
 | Se elimina un registro | Se mueve a la papelera; deja de contar en el catálogo. | Se puede restaurar o borrar definitivamente desde **Papelera**. |
-| Se exporta con búsqueda o filtro activo | Solo se exportan las filas visibles. | Quitá filtros para obtener el inventario completo. |
+| Se exporta con búsqueda o filtro activo | Solo se exportan las filas visibles, tanto en CSV como en Excel. El Excel lo indica en el subtítulo y en el nombre del archivo. | Quitá filtros para obtener el inventario completo. |
 | Se abre el panel en otro navegador o dispositivo | La colección aparece desde MySQL mientras se pueda conectar a la PC/servidor que aloja la API. | La base de esta configuración solo publica los puertos en `127.0.0.1`; no es accesible desde otros dispositivos de la red. |
 | Se editan datos desde dos pestañas abiertas | Cada operación se valida contra MySQL; los números repetidos se rechazan. No hay versionado de registros, así que dos ediciones simultáneas del mismo registro pueden pisarse. | Es una configuración de desarrollo para una sola persona, no de operación concurrente. |
 | El navegador borra los datos del sitio | El catálogo no se borra porque está en MySQL; solo se pierden la preferencia de tema y la **actividad reciente**. | Conservá backups de MySQL/exportaciones CSV para proteger la colección. |
@@ -240,7 +253,7 @@ El CSV agrupa varios números bajo un mismo registro bibliográfico. Esto modela
 - [`index.html`](./index.html): estructura y formulario.
 - [`styles.css`](./styles.css): estilos y temas claro/oscuro.
 - [`app.js`](./app.js): operaciones CRUD, validación, CSV, OCR, ChatBot y llamadas a la API.
-- [`backend/app/`](./backend/app/): API FastAPI, modelos, validación, importación, OCR y ChatBot.
+- [`backend/app/`](./backend/app/): API FastAPI, modelos, validación, importación, OCR, ChatBot y exportación a Excel (`export.py`).
 - [`backend/migrations/`](./backend/migrations/): migraciones versionadas con Alembic.
 - [`backend/tests/`](./backend/tests/): pruebas de importación, API y migraciones.
 - [`Entrevistas_Contexto/`](./Entrevistas_Contexto/): base de conocimiento institucional (entrevistas y normativas) que alimenta al ChatBot.

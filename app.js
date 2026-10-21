@@ -1233,6 +1233,31 @@ async function handleOcrFiles(fileList) {
   }
 }
 
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function filenameFromDisposition(header, fallback) {
+  if (!header) return fallback;
+  const encoded = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1]);
+    } catch (error) {
+      console.warn("No se pudo decodificar el nombre del archivo.", error);
+    }
+  }
+  const plain = header.match(/filename="?([^";]+)"?/i);
+  return plain ? plain[1] : fallback;
+}
+
 function exportCsv() {
   const headers = ["N° Inv.", "Autor", "Título", "Pie de Imprenta", "Encuadernación / Observaciones"];
   const quote = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
@@ -1247,15 +1272,61 @@ function exportCsv() {
     ].map(quote).join(",")),
   ];
   const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `inventario-biblioteca-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, `inventario-biblioteca-${new Date().toISOString().slice(0, 10)}.csv`);
   showToast("Se exportó la vista actual en el formato de tu catálogo.");
+}
+
+async function exportExcel() {
+  const query = elements.search.value.trim();
+  const button = document.querySelector("#excel-button");
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  try {
+    const url = query
+      ? `/api/export.xlsx?q=${encodeURIComponent(query)}`
+      : "/api/export.xlsx";
+    let response;
+    try {
+      response = await fetch(url);
+    } catch (cause) {
+      throw httpError(
+        location.protocol === "file:"
+          ? "El panel se abrió como archivo. Abrilo desde http://localhost:8000/"
+          : "No se pudo conectar con el servidor para generar el Excel.",
+        0,
+      );
+    }
+    if (!response.ok) {
+      let detail = "";
+      try {
+        const body = await response.json();
+        if (typeof body?.detail === "string") detail = body.detail;
+      } catch (cause) {
+        detail = "";
+      }
+      throw httpError(detail || `La API respondió con el estado ${response.status}.`, response.status);
+    }
+    const blob = await response.blob();
+    const fallback = `inventario-biblioteca-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    downloadBlob(
+      blob,
+      filenameFromDisposition(response.headers.get("content-disposition"), fallback),
+    );
+    showToast(
+      query
+        ? "Excel exportado con las filas que coinciden con la búsqueda."
+        : "Excel exportado con el catálogo completo, su resumen y los ejemplares.",
+    );
+    logActivity(
+      `Exportación Excel: ${query ? `búsqueda «${query}»` : "catálogo completo"}.`,
+      "info",
+    );
+  } catch (error) {
+    console.error("No se pudo exportar el catálogo a Excel.", error);
+    showToast(`No se pudo exportar a Excel: ${error.message}`);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function appendChatMessage(role, text) {
@@ -1373,6 +1444,7 @@ document.querySelector(".close-dialog").addEventListener("click", () => elements
 elements.form.addEventListener("submit", handleSubmit);
 elements.search.addEventListener("input", renderBooks);
 document.querySelector("#export-button").addEventListener("click", exportCsv);
+document.querySelector("#excel-button")?.addEventListener("click", exportExcel);
 document.querySelector("#clear-all-button")?.addEventListener("click", clearCatalog);
 document.querySelector("#trash-button")?.addEventListener("click", openTrash);
 document.querySelector(".close-trash")?.addEventListener("click", () => elements.trashDialog.close());
