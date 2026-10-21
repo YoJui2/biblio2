@@ -4,13 +4,14 @@ from pathlib import Path
 from typing import Annotated
 
 import csv
+import json
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app import chatbot, ocr
+from app import backup, chatbot, ocr
 from app.config import PROJECT_ROOT, Settings
 from app.export import build_catalog_workbook
 from app.db import Base, make_session_factory, session_dependency
@@ -21,6 +22,7 @@ from app.inventory import (
 )
 from app.models import BibliographicRecord, InventoryCopy
 from app.schemas import (
+    BackupRestoreResult,
     BulkCreateResult,
     ChatReply,
     ChatRequest,
@@ -414,6 +416,130 @@ def create_app(
             session.execute(delete(BibliographicRecord).where(trashed))
             session.commit()
         return DeleteAllResult(deleted_records=records, deleted_copies=copies)
+
+    @application.get("/api/backup", tags=["respaldo"])
+    def download_backup(
+        session: Annotated[Session, Depends(dependency)],
+    ) -> Response:
+        records = session.scalars(
+            select(BibliographicRecord)
+            .options(selectinload(BibliographicRecord.copies))
+            .order_by(BibliographicRecord.id)
+        ).all()
+        payload = backup.build_backup(records)
+        content = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        filename = f"respaldo-biblioteca-{datetime.now():%Y-%m-%d-%H%M}.json"
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+            },
+        )
+
+    @application.post(
+        "/api/backup/restore",
+        response_model=BackupRestoreResult,
+        tags=["respaldo"],
+    )
+    async def restore_backup(
+        session: Annotated[Session, Depends(dependency)],
+        file: Annotated[UploadFile, File()],
+        confirm_replace: Annotated[bool, Form()] = False,
+        mode: Annotated[str, Query(pattern="^(replace|merge)$")] = "replace",
+    ):
+        if not file.filename or Path(file.filename).suffix.lower() != ".json":
+            raise HTTPException(
+                status_code=400,
+                detail="Seleccioná un archivo .json descargado con «Respaldar».",
+            )
+        content = await file.read(backup.MAX_BACKUP_BYTES + 1)
+        if len(content) > backup.MAX_BACKUP_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="El respaldo supera el límite de 20 MB.",
+            )
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError as error:
+            raise HTTPException(
+                status_code=400,
+                detail="El respaldo debe estar guardado con codificación UTF-8.",
+            ) from error
+        try:
+            items = backup.parse_backup(text)
+        except backup.BackupError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+        pending = items
+        skipped = 0
+        try:
+            with session.begin():
+                if mode == "replace":
+                    current_count = (
+                        session.scalar(
+                            select(func.count()).select_from(BibliographicRecord)
+                        )
+                        or 0
+                    )
+                    if current_count and not confirm_replace:
+                        raise HTTPException(
+                            status_code=409,
+                            detail=(
+                                f"El sistema ya contiene {current_count} registros "
+                                "(incluida la papelera). Confirmá el reemplazo antes "
+                                "de restaurar el respaldo."
+                            ),
+                        )
+                    session.execute(delete(InventoryCopy))
+                    session.execute(delete(BibliographicRecord))
+                else:
+                    existing = _active_inventory_numbers(session)
+                    filtered: list[dict[str, object]] = []
+                    for item in items:
+                        numbers = item["inventory_numbers"]
+                        assert isinstance(numbers, list)
+                        if any(number in existing for number in numbers):
+                            skipped += 1
+                            continue
+                        if item["deleted_at"] is None:
+                            existing.update(numbers)
+                        filtered.append(item)
+                    pending = filtered
+
+                for item in pending:
+                    numbers = item["inventory_numbers"]
+                    assert isinstance(numbers, list)
+                    session.add(
+                        BibliographicRecord(
+                            section="",
+                            title=str(item["title"]),
+                            author=str(item["author"]),
+                            imprint=str(item["imprint"]),
+                            binding=str(item["binding"]),
+                            inventory_source=str(item["inventory_source"]),
+                            deleted_at=item["deleted_at"],
+                            copies=[
+                                InventoryCopy(inventory_number=number)
+                                for number in numbers
+                            ],
+                        )
+                    )
+        except IntegrityError as error:
+            session.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="No se pudo restaurar el respaldo por un conflicto de inventario.",
+            ) from error
+
+        copies = sum(len(item["inventory_numbers"]) for item in pending)
+        return BackupRestoreResult(
+            mode=mode,
+            records=len(pending),
+            copies=copies,
+            skipped=skipped,
+        )
 
     @application.post(
         "/api/import",

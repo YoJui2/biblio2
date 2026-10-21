@@ -18,6 +18,7 @@ const elements = {
   formError: document.querySelector("#form-error"),
   toast: document.querySelector("#toast"),
   csvInput: document.querySelector("#csv-input"),
+  backupInput: document.querySelector("#backup-input"),
   ocrInput: document.querySelector("#ocr-input"),
   ocrDialogInput: document.querySelector("#ocr-dialog-input"),
   ocrPreview: document.querySelector("#ocr-preview"),
@@ -1329,6 +1330,125 @@ async function exportExcel() {
   }
 }
 
+async function downloadBackup() {
+  const button = document.querySelector("#backup-button");
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  try {
+    let response;
+    try {
+      response = await fetch("/api/backup");
+    } catch (cause) {
+      throw httpError(
+        location.protocol === "file:"
+          ? "El panel se abrió como archivo. Abrilo desde http://localhost:8000/"
+          : "No se pudo conectar con el servidor para generar el respaldo.",
+        0,
+      );
+    }
+    if (!response.ok) {
+      let detail = "";
+      try {
+        const body = await response.json();
+        if (typeof body?.detail === "string") detail = body.detail;
+      } catch (cause) {
+        detail = "";
+      }
+      throw httpError(detail || `La API respondió con el estado ${response.status}.`, response.status);
+    }
+    const blob = await response.blob();
+    const fallback = `respaldo-biblioteca-${new Date().toISOString().slice(0, 10)}.json`;
+    downloadBlob(
+      blob,
+      filenameFromDisposition(response.headers.get("content-disposition"), fallback),
+    );
+    showToast("Respaldo descargado con el catálogo y la papelera.");
+    logActivity("Respaldo descargado: catálogo y papelera.", "ok");
+  } catch (error) {
+    console.error("No se pudo descargar el respaldo.", error);
+    showToast(`No se pudo descargar el respaldo: ${error.message}`);
+    logActivity(`No se pudo descargar el respaldo: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function handleBackupFile(file) {
+  const button = document.querySelector("#restore-button");
+  if (!file.name || !/\.json$/i.test(file.name)) {
+    showToast("Seleccioná un archivo .json descargado con «Respaldar».");
+    return;
+  }
+  let summary = "";
+  try {
+    const data = JSON.parse(await file.text());
+    const records = Array.isArray(data) ? data : data?.records;
+    if (!Array.isArray(records) || !records.length) {
+      throw new Error("El archivo no contiene registros de respaldo.");
+    }
+    const active = records.filter((record) => !record?.deleted_at).length;
+    const trashed = records.length - active;
+    const copies = records.reduce(
+      (total, record) => total + (Array.isArray(record?.inventory_numbers) ? record.inventory_numbers.length : 0),
+      0,
+    );
+    summary = `${records.length.toLocaleString("es")} registro(s) —${active.toLocaleString("es")} activo(s) y ${trashed.toLocaleString("es")} en papelera— con ${copies.toLocaleString("es")} número(s) de inventario.`;
+  } catch (error) {
+    console.error("El archivo no es un respaldo válido.", error);
+    showToast(`El archivo no es un respaldo válido: ${error.message}`);
+    logActivity(`Respaldo inválido: ${error.message}`, "error");
+    return;
+  }
+
+  const choice = await openChoiceDialog({
+    title: "Restaurar respaldo",
+    eyebrow: "RESPALDO",
+    message: `El archivo contiene ${summary} Elegí «Reemplazar todo» para dejar el sistema tal como estaba en ese respaldo o «Ignorar duplicados» para agregar solo los registros cuyos números de inventario no estén activos.`,
+    options: [
+      { value: null, label: "Cancelar", className: "button-cancel" },
+      { value: "merge", label: "Ignorar duplicados", className: "button-export" },
+      { value: "replace", label: "Reemplazar todo", className: "button-danger" },
+    ],
+  });
+  if (!choice) return;
+  if (choice === "replace") {
+    const confirmed = await confirmAction(
+      `Se borrarán el catálogo y la papelera actuales (${books.length.toLocaleString("es")} registro(s) activos) y se restaurará el respaldo completo. Esta acción no se puede deshacer.`,
+      { title: "Reemplazar el inventario", eyebrow: "CONFIRMAR", confirmLabel: "Sí, restaurar", tone: "danger" },
+    );
+    if (!confirmed) return;
+  }
+
+  if (button) button.disabled = true;
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("confirm_replace", String(choice === "replace"));
+    const result = await apiRequest(`/api/backup/restore?mode=${choice}`, {
+      method: "POST",
+      body: formData,
+    });
+    elements.search.value = "";
+    await refreshBooks();
+    await refreshTrashCount();
+    const skippedNote = result.skipped
+      ? ` Se omitieron ${result.skipped} registro(s) con números ya asignados.`
+      : "";
+    const action = choice === "replace" ? "Restaurado" : "Combinado";
+    showToast(`${action}: ${result.records} registro(s) y ${result.copies} número(s) de inventario.${skippedNote}`);
+    logActivity(
+      `Respaldo ${choice === "replace" ? "restaurado (reemplazo)" : "combinado"}: ${result.records} registro(s)${result.skipped ? `, ${result.skipped} duplicado(s) omitidos` : ""}.`,
+      result.skipped ? "warn" : "ok",
+    );
+  } catch (error) {
+    console.error("No se pudo restaurar el respaldo.", error);
+    showToast(`No se pudo restaurar el respaldo: ${error.message}`);
+    logActivity(`No se pudo restaurar el respaldo: ${error.message}`, "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function appendChatMessage(role, text) {
   const wrapper = document.createElement("div");
   wrapper.className = `chat-message ${role}`;
@@ -1445,6 +1565,13 @@ elements.form.addEventListener("submit", handleSubmit);
 elements.search.addEventListener("input", renderBooks);
 document.querySelector("#export-button").addEventListener("click", exportCsv);
 document.querySelector("#excel-button")?.addEventListener("click", exportExcel);
+document.querySelector("#backup-button")?.addEventListener("click", downloadBackup);
+document.querySelector("#restore-button")?.addEventListener("click", () => elements.backupInput?.click());
+elements.backupInput?.addEventListener("change", () => {
+  const [file] = elements.backupInput.files;
+  elements.backupInput.value = "";
+  if (file) handleBackupFile(file);
+});
 document.querySelector("#clear-all-button")?.addEventListener("click", clearCatalog);
 document.querySelector("#trash-button")?.addEventListener("click", openTrash);
 document.querySelector(".close-trash")?.addEventListener("click", () => elements.trashDialog.close());

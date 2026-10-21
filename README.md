@@ -156,6 +156,28 @@ Las tres hojas están preparadas para imprimir en A4 (orientación y repetición
 
 La exportación a Excel usa `openpyxl`; si la API corre en Docker, reconstruila una vez con `docker compose build api && docker compose up -d` para instalar la dependencia.
 
+## Respaldar y restaurar el inventario
+
+El panel incluye dos botones en la barra del catálogo para conservar y recuperar el inventario sin depender de MySQL:
+
+- **Respaldar** descarga `respaldo-biblioteca-AAAA-MM-DD-HHMM.json` desde `GET /api/backup`. El archivo incluye **todos** los registros —activos y los que están en la papelera— con sus números de inventario, títulos, autores, pie de imprenta y encuadernación, más un resumen de totales y la fecha de generación.
+- **Restaurar respaldo** abre un selector de archivos y luego un cuadro en pantalla con dos modos:
+  - **Reemplazar todo** (`mode=replace`): borra el catálogo y la papelera actuales y deja el sistema tal como estaba en el respaldo. Si ya hay datos, la API exige la confirmación explícita (`confirm_replace`); si se omite, responde `409` y no cambia nada.
+  - **Ignorar duplicados** (`mode=merge`): agrega solo los registros cuyos números de inventario no estén activos en el sistema. Los que chocan se omiten y se informa cuántos. La papelera existente se conserva.
+  - **Cancelar**: no cambia nada.
+
+El respaldo es JSON portable, no un volcado de MySQL, así que también sirve para mover los datos entre instalaciones o entre MySQL y SQLite. La restauración es **atómica**: valida todo el archivo antes de tocar la base y revierte la transacción si algo falla. Se rechazan archivos de más de 20 MB, con formato desconocido, con números repetidos dentro de un registro, con números duplicados entre registros activos, con números menores que 1 o con fechas inválidas.
+
+Por API:
+
+```powershell
+curl.exe -o respaldo.json http://localhost:8000/api/backup
+curl.exe -X POST "http://localhost:8000/api/backup/restore?mode=merge" -F "file=@respaldo.json"
+curl.exe -X POST "http://localhost:8000/api/backup/restore?mode=replace" -F "file=@respaldo.json" -F "confirm_replace=true"
+```
+
+La respuesta de la restauración tiene el formato `{ "mode": "replace", "records": 195, "copies": 751, "skipped": 0 }`. Los `id` internos no se conservan: los registros se insertan de nuevo respetando sus números de inventario, sus datos y su estado en la papelera. Para una copia a nivel de motor (por ejemplo, un `mysqldump` del volumen `mysql_data`) seguí usando las herramientas de MySQL/Docker; este respaldo está pensado para el contenido del inventario y para recuperarlo desde el panel.
+
 ## Importación y reemplazos
 
 1. Elegí **Importar CSV** y seleccioná el archivo.
@@ -245,17 +267,17 @@ El CSV agrupa varios números bajo un mismo registro bibliográfico. Esto modela
 3. **Conflictos de identidad:** usar el número de inventario como identificador único del ejemplar. No fusionar registros por título o autor automáticamente: esos campos pueden repetirse o variar en su escritura.
 4. **Trazabilidad:** guardar archivo, fecha, usuario, fila de origen, número original y resultado de cada importación; permitir descargar un informe de filas omitidas o conflictivas.
 5. **Transacciones y concurrencia:** validar y aplicar una importación como operación atómica; usar transacciones y control de versión para que dos administradores no se pisen.
-6. **Respaldo y permisos:** definir autenticación, roles, exportaciones de respaldo y políticas de recuperación antes de exponer la API a una red o usar el sistema como inventario oficial. Esta versión no incluye login.
+6. **Respaldo y permisos:** el respaldo JSON del inventario ya está implementado (`/api/backup` y `/api/backup/restore`). Faltan autenticación, roles, copias automáticas programadas y políticas de recuperación antes de exponer la API a una red o usar el sistema como inventario oficial. Esta versión no incluye login.
 7. **OCR de imágenes escaneadas:** implementado como propuesta (`/api/ocr/scan`); muestra la imagen y los campos reconocidos para corregir rangos repetidos, ilegibles o ambiguos antes de persistirlos.
 
 ## Archivos de la interfaz
 
 - [`index.html`](./index.html): estructura y formulario.
 - [`styles.css`](./styles.css): estilos y temas claro/oscuro.
-- [`app.js`](./app.js): operaciones CRUD, validación, CSV, OCR, ChatBot y llamadas a la API.
-- [`backend/app/`](./backend/app/): API FastAPI, modelos, validación, importación, OCR, ChatBot y exportación a Excel (`export.py`).
+- [`app.js`](./app.js): operaciones CRUD, validación, CSV, OCR, respaldos, ChatBot y llamadas a la API.
+- [`backend/app/`](./backend/app/): API FastAPI, modelos, validación, importación, respaldos (`backup.py`), OCR, ChatBot y exportación a Excel (`export.py`).
 - [`backend/migrations/`](./backend/migrations/): migraciones versionadas con Alembic.
-- [`backend/tests/`](./backend/tests/): pruebas de importación, API y migraciones.
+- [`backend/tests/`](./backend/tests/): pruebas de importación, API, respaldos y migraciones.
 - [`Entrevistas_Contexto/`](./Entrevistas_Contexto/): base de conocimiento institucional (entrevistas y normativas) que alimenta al ChatBot.
 - [`backend/requirements.txt`](./backend/requirements.txt): dependencias de la API, instaladas durante la construcción de la imagen Docker.
 - [`.env.example`](./.env.example): plantilla de variables; copiá a `.env` y reemplazá las contraseñas locales.

@@ -54,6 +54,13 @@ class ImportResult(BaseModel):
     skipped: int = 0
 
 
+class BackupRestoreResult(BaseModel):
+    mode: Literal["replace", "merge"]
+    records: int
+    copies: int
+    skipped: int = 0
+
+
 class BulkCreateResult(BaseModel):
     records: int
     copies: int

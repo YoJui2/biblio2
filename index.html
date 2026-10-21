@@ -12,7 +12,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css?v=11" />
-    <script src="app.js?v=14" defer></script>
+    <script src="app.js?v=15" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -137,6 +137,15 @@
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v11m0 0 4-4m-4 4-4-4M5 16.5v4h14v-4"/></svg>
                   Exportar CSV
                 </button>
+                <button class="button button-export" id="backup-button" type="button" title="Descarga un respaldo JSON del catálogo y la papelera">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v10m0 0 4-4m-4 4-4-4"/><path d="M5 14.5v3A1.5 1.5 0 0 0 6.5 19h11a1.5 1.5 0 0 0 1.5-1.5v-3"/></svg>
+                  Respaldar
+                </button>
+                <button class="button button-export" id="restore-button" type="button" title="Restaura un respaldo JSON descargado antes">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V5m0 0L8 9m4-4 4 4"/><path d="M5 14.5v3A1.5 1.5 0 0 0 6.5 19h11a1.5 1.5 0 0 0 1.5-1.5v-3"/></svg>
+                  Restaurar respaldo
+                </button>
+                <input id="backup-input" type="file" accept=".json,application/json" hidden />
                 <button class="button button-danger" id="clear-all-button" type="button" title="Mueve todos los registros a la papelera">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m2 0v11.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 7 18.5V7m3 3v6m4-6v6"/></svg>
                   Vaciar catálogo
